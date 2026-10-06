@@ -4,15 +4,13 @@
 
 | | |
 |---|---|
-| Agent / model | codex-cli / sol |
+| Agent / model | codex-cli / gpt-6.1-sol |
 | Harness | codex-cli |
 | Toolkit | **kicad-tools** (`prompts/tools/kicad-tools.md`) |
 | Time | **60 minutes**, whole suite |
 | Operator branch | `test-sol-kct` |
 | Judge branch | `judge/run--b7a732ee` (created by `bench/finish`; the only branch judges see) |
 | Workspace | `~/pcba-bench-runs/run--b7a732ee` |
-
-> **Model ID to confirm:** `sol` is a placeholder. Replace it with the exact model ID in the launch command below and in `submissions/run--b7a732ee/run.json` before starting.
 
 ## How this works
 
@@ -45,7 +43,7 @@ A clean `CODEX_HOME` holds only your login and this run's config. Your other MCP
 ```bash
 mkdir -p ~/pcba-bench-runs/.run--b7a732ee/codex-home && cp ~/.codex/auth.json ~/pcba-bench-runs/.run--b7a732ee/codex-home/ && chmod 600 ~/pcba-bench-runs/.run--b7a732ee/codex-home/auth.json
 cat > ~/pcba-bench-runs/.run--b7a732ee/codex-home/config.toml <<'TOML'
-model = "sol"
+model = "gpt-6.1-sol"
 
 [mcp_servers.kct]
 command = "/Users/rwalters/.local/bin/kct"
@@ -71,7 +69,7 @@ ls ~/.claude/CLAUDE.md ~/.codex/AGENTS.md 2>/dev/null   # global instruction fil
 1. Open a terminal and launch a **fresh** session:
 
    ```bash
-   cd ~/pcba-bench-runs/run--b7a732ee && PATH=$HOME/.local/bin:$PATH CODEX_HOME=~/pcba-bench-runs/.run--b7a732ee/codex-home codex -m sol --dangerously-bypass-approvals-and-sandbox
+   cd ~/pcba-bench-runs/run--b7a732ee && PATH=$HOME/.local/bin:$PATH CODEX_HOME=~/pcba-bench-runs/.run--b7a732ee/codex-home codex -m gpt-6.1-sol --dangerously-bypass-approvals-and-sandbox
    ```
 
    In the new session, before sending the prompt, type `/mcp`: only `kct` may be listed.
