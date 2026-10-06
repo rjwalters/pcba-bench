@@ -1,0 +1,80 @@
+{
+  "schema": 2,
+  "run_id": "run--ca689a46",
+  "boards": [
+    "00-simple-led",
+    "01-voltage-divider",
+    "02-charlieplex-led",
+    "03-usb-joystick",
+    "04-stm32-devboard",
+    "05-bldc-motor-controller",
+    "06-diffpair-test",
+    "07-matchgroup-test",
+    "08-precision-acquisition",
+    "09-usbc-pd-power"
+  ],
+  "track": "bare",
+  "agent": "codex-cli / gpt-6-astra",
+  "minutes": 60,
+  "prompt_version": 3,
+  "initial_prompt_sha256": "5dee32ee74ba54e2cf50424c36d1d17f3cce2d3f870b5b59af3209e6a52b5b9f",
+  "continue_prompt_sha256": "3ac44dc111f8644cec396c0f9f5b29405559fc46da105ad0dcf83d853ba56d8f",
+  "tools_sha256": "b6a9f10941784fc312602f1a5b9eae746aed26bc9650c44d74fd97bdef7d1dcb",
+  "inputs_sha256": {
+    "00-simple-led": {
+      "BRIEF.md": "d89a1b8faaccb6a3869e79f1ecb15063aa95913ce40404b4613e0ed4d2dbcd32",
+      "requirements.toml": "0b7b128ad68ff24d79380003a89bca03e28dfb4c6864f04a9d0aeadd604ef659",
+      "board.toml": "36485c51c162961b00f1455d86ea1fa757abf9c2f1f51e608049b7f7d78288aa"
+    },
+    "01-voltage-divider": {
+      "BRIEF.md": "695a4efd1ebe512e3a33462beff7c0ff32c90b5e2df0ae2355f36c16ebdce042",
+      "requirements.toml": "ee1d65708f477f4286a8be8777d9bd4264a93e4c49466d7d116fd5fa07491395",
+      "board.toml": "ae5a192c2124326d697e07ea146c35e7b8c1d32648c9472779992a935bb05ee9"
+    },
+    "02-charlieplex-led": {
+      "BRIEF.md": "01162eeb68dc48b2e2e7d189ef2b9d0dafae968089da2f500c521e9ada116d82",
+      "requirements.toml": "9aae6d4545a862722bbf2d1a23fd5eb6f4968dbcde6138da19c930424ac2cccf",
+      "board.toml": "c63a8951b64f51ba83ed02332cf5508eda6a725fb0ac2e3a550e4dbf91daad46"
+    },
+    "03-usb-joystick": {
+      "BRIEF.md": "0e34baf12f7ad80202de56c1f3b590bf04765f34ddc6b0b2717af1d75f0be44e",
+      "requirements.toml": "4c4060c83ce5b6c9092c2b3901201d4a108fa550580a851704edb5a5eb9b8e63",
+      "board.toml": "f3e8fe744bade98cc3aa3801572f17da8215feb2ce2a009fbe3e3a3b63aa55f1"
+    },
+    "04-stm32-devboard": {
+      "BRIEF.md": "1110f30c33ef22051b5b5473284f612de636c4d4390238a1602f2a4bc5d1c2fc",
+      "requirements.toml": "ddacfe03ee5ac420dd03146d3d6cfd00902b2179d85d622f85bc9f202c5de1d4",
+      "board.toml": "1a9c893172dca5283fa46aa66ce7970cba429d5d2fa35557c4a1aad30df48be7"
+    },
+    "05-bldc-motor-controller": {
+      "BRIEF.md": "11ad439b3d0b7442f6912a7b16c098d14afb80f08a465bc77488121609f39757",
+      "requirements.toml": "c4465136e6d69798885a76edb69294a7b39f3b88b278e37a32769060cb0d0213",
+      "board.toml": "87ad7de7ebf28af8f8eb385264335fe9ab25e9da3cd2d58992d2319dcb428203"
+    },
+    "06-diffpair-test": {
+      "BRIEF.md": "fd5b86a417b2d9376812956f0370798f60ffd4d2996b12fa5b1d696bccd7b4da",
+      "requirements.toml": "d7a5faa82f6d6697d4f327fdbf9131afe6170fb5d9e13401505023bd4e4ae80f",
+      "board.toml": "0e242338e69f07fa3e7d4477639daa0b3f34aa5525f5d4a71b2ce66dd051fe47"
+    },
+    "07-matchgroup-test": {
+      "BRIEF.md": "e6befcae4feea9a90414a1964c9b818c6f1dc8675840b9b14cb2bb840b559798",
+      "requirements.toml": "6ab9bc21e9482628fa4729e2670830dd1c918a396b4ae7d5b5d68d6bb68b61c9",
+      "board.toml": "0ccc419be8d64fe79bf4a74c5a7325465f24f0ed35741ba36e4a915973a894ea"
+    },
+    "08-precision-acquisition": {
+      "BRIEF.md": "7f4e58b99b57a3bc72479c72d64a6ac920ae2f0f0a958cbf388adc4bd1b7dc6f",
+      "requirements.toml": "075d1a697b95c3fc52fbc9e65a2464f43ee80e2ecc876b98b001ef588ed45ef1",
+      "board.toml": "ea718e2fb0ecd3166d9959faa5ad373f86e0f7d397152f41ce13345a61e11d75"
+    },
+    "09-usbc-pd-power": {
+      "BRIEF.md": "b9319b350a55fe1eac8ae94f4a96ddba410976fb455a63b08e8af4f21f51227e",
+      "requirements.toml": "83923e6015ddabfc46d3b32136f87124189bf7b6f4716b889c02d3287965032c",
+      "board.toml": "1cf4cfa5158cef18b6276bdb44a29c68e30ec1e54d06f78a59424334a499ab8c"
+    }
+  },
+  "started_at": null,
+  "finished_at": null,
+  "continue_prompts_sent": null,
+  "branch": "test-astra-base",
+  "judge_branch": "judge/run--ca689a46"
+}
