@@ -48,6 +48,7 @@ def main() -> int:
     ap.add_argument("--minutes", type=int, default=DEFAULT_MINUTES, help="total time for the whole suite")
     ap.add_argument("--boards", nargs="+", help="development only: a subset (missing boards still score 0)")
     ap.add_argument("--runs-dir", type=Path, default=Path.home() / "pcba-bench-runs")
+    ap.add_argument("--branch", help="operator branch name, e.g. test-opus-kct (default: run/<run-id>)")
     ap.add_argument("--no-branch", action="store_true", help="don't create the submission branch")
     args = ap.parse_args()
 
@@ -63,11 +64,12 @@ def main() -> int:
         sys.exit("--runs-dir must be outside the pcba-bench checkout (PROTOCOL.md §2)")
 
     run_id = f"run--{secrets.token_hex(4)}"
+    branch = args.branch or f"run/{run_id}"
     if not args.no_branch:
         dirty = subprocess.run(["git", "-C", str(REPO), "status", "--porcelain"], capture_output=True, text=True).stdout
         if dirty.strip():
             sys.exit("working tree is not clean; commit or stash first (or pass --no-branch)")
-        subprocess.run(["git", "-C", str(REPO), "switch", "-q", "-c", f"run/{run_id}"], check=True)
+        subprocess.run(["git", "-C", str(REPO), "switch", "-q", "-c", branch], check=True)
 
     ws = runs_dir / run_id
     for b in boards:
@@ -89,6 +91,8 @@ def main() -> int:
         "schema": 2,
         "run_id": run_id,
         "boards": boards,
+        "branch": None if args.no_branch else branch,
+        "judge_branch": f"judge/{run_id}",
         "track": args.track,
         "agent": args.agent,
         "minutes": args.minutes,
@@ -109,14 +113,16 @@ def main() -> int:
         rec.mkdir(parents=True)
         (rec / "run.json").write_text(json.dumps(run, indent=2) + "\n")
         subprocess.run(["git", "-C", str(REPO), "add", "--", str(rec.relative_to(REPO))], check=True)
+        subprocess.run([sys.executable, str(REPO / "bench" / "instructions"), run_id], check=True,
+                       capture_output=True)
+        subprocess.run(["git", "-C", str(REPO), "add", "--", str(rec.relative_to(REPO))], check=True)
         subprocess.run(["git", "-C", str(REPO), "commit", "-q", "-m", f"Start {run_id}"], check=True)
 
     if not args.no_branch:
-        print(f"branch:    run/{run_id}")
+        print(f"branch:    {branch}   (judges later use judge/{run_id})")
     print(f"workspace: {ws}")
     print(f"prompt:    {ws / 'PROMPT.md'}")
-    print("Launch the agent's harness with the workspace as cwd, send PROMPT.md, and start the clock:")
-    print(f"  bench/finish {run_id} --mark-start")
+    print(f"Operator steps: submissions/{run_id}/TEST_INSTRUCTIONS.md")
     return 0
 
 

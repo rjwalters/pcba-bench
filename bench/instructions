@@ -1,0 +1,195 @@
+#!/usr/bin/env python3
+"""Write the operator's TEST_INSTRUCTIONS.md for a run, from its run.json.
+
+    bench/instructions <run-id> [--model-id ID]
+
+Output: submissions/<run-id>/TEST_INSTRUCTIONS.md (operator-only; judges must not read it).
+bench/start calls this automatically.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import sys
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+KCT_VERSION = "0.22.0"
+
+
+def harness_of(agent: str) -> str:
+    a = agent.lower()
+    for h in ("claude-code", "codex-cli", "opencode"):
+        if a.startswith(h):
+            return h
+    return "other"
+
+
+def model_of(agent: str) -> str:
+    return agent.split("/", 1)[1].strip() if "/" in agent else "<MODEL_ID>"
+
+
+def strip_comment(text: str) -> str:
+    return re.sub(r"<!--.*?-->\s*", "", text, count=1, flags=re.S).strip()
+
+
+def render(run: dict, model_override: str | None) -> str:
+    rid, track, agent, minutes = run["run_id"], run["track"], run["agent"], run["minutes"]
+    branch = run.get("branch") or f"run/{rid}"
+    jbranch = run.get("judge_branch") or f"judge/{rid}"
+    harness = harness_of(agent)
+    model = model_override or model_of(agent)
+    ws = f"~/pcba-bench-runs/{rid}"
+    side = f"~/pcba-bench-runs/.{rid}"           # operator-side files, outside the workspace
+    kct = track == "kicad-tools"
+    cont = strip_comment((REPO / "prompts" / "continue.md").read_text())
+    model_note = ("" if re.fullmatch(r"[\w.\-]+", model) and model not in ("sol", "<MODEL_ID>") else
+                  f"\n> **Model ID to confirm:** `{model}` is a placeholder. Replace it with the exact model ID "
+                  f"in the launch command below and in `submissions/{rid}/run.json` before starting.\n")
+
+    out = [f"# Test instructions: `{rid}`", "",
+           "**Operator only.** Never show this file to the agent under test or to a judge. It names the condition.",
+           "",
+           "| | |", "|---|---|",
+           f"| Agent / model | {agent} |",
+           f"| Harness | {harness} |",
+           f"| Toolkit | **{track}** (`prompts/tools/{'kicad-tools' if kct else 'bare'}.md`) |",
+           f"| Time | **{minutes} minutes**, whole suite |",
+           f"| Operator branch | `{branch}` |",
+           f"| Judge branch | `{jbranch}` (created by `bench/finish`; the only branch judges see) |",
+           f"| Workspace | `{ws}` |",
+           model_note,
+           "## How this works",
+           "",
+           "1. **Phase A, setup.** You or a setup agent prepare the environment. Ask any agent session to "
+           "\"follow Phase A of this file\": it is mechanical and has verification commands.",
+           "2. **Phase B, the run.** Start a **fresh** harness session with the exact launch command below. "
+           "Don't `/clear` the setup session: the isolation flags only take effect at launch, and the "
+           "transcript has to begin with the test prompt.",
+           "3. **Phase C, submit.** Snapshot and commit at the deadline.",
+           "",
+           "## Phase A: setup",
+           "",
+           "```bash",
+           f"cd ~/GitHub/pcba-bench && git fetch -q && git switch {branch} && git pull -q",
+           f"mkdir -p {side}",
+           "```", ""]
+
+    if kct:
+        out += ["### A1. Toolkit: kicad-tools " + KCT_VERSION, "",
+                "```bash",
+                f"uv tool install --force kicad-tools=={KCT_VERSION}",
+                "~/.local/bin/kct build-native",
+                f"~/.local/bin/kct --version             # must print: kicad-tools {KCT_VERSION}",
+                "~/.local/bin/kct build-native --check   # must print: C++ backend: available",
+                "```", "",
+                "Put `~/.local/bin` **first** on `PATH` for the run. The old Homebrew `kct` 0.12.0 in "
+                "`/opt/homebrew/bin` must not win.", ""]
+    else:
+        out += ["### A1. Toolkit: bare (hide kicad-tools)", "",
+                "kicad-tools may be installed on this host for other runs and for judges. For a bare run it must be "
+                "unreachable, so shim it out:", "",
+                "```bash",
+                f"mkdir -p {side}/bin",
+                f"printf '#!/bin/sh\\necho \"kct is not available in this run\" >&2\\nexit 127\\n' > {side}/bin/kct",
+                f"chmod +x {side}/bin/kct",
+                f"PATH={side}/bin:$PATH kct --version      # must fail with 'not available'",
+                "```", "",
+                "`bench/finish` also flags any kicad-tools use in a bare transcript.", ""]
+
+    if harness == "claude-code":
+        mcp = ('{"mcpServers": {"kct": {"command": "' + str(Path.home() / ".local/bin/kct")
+               + '", "args": ["mcp", "serve"]}}}') if kct else '{"mcpServers": {}}'
+        out += ["### A2. Harness: Claude Code, isolated", "",
+                "Only the declared tools may be visible. That means no claude.ai connectors, plugins, user "
+                "skills, commands, hooks or user CLAUDE.md. The launch flags below enforce it. The MCP config "
+                "lives outside the workspace:", "",
+                "```bash",
+                f"cat > {side}/mcp.json <<'JSON'", mcp, "JSON",
+                "```", ""]
+        path_prefix = f"PATH={'$HOME/.local/bin' if kct else side + '/bin'}:$PATH"
+        launch = (f"cd {ws} && {path_prefix} claude --model {model} --dangerously-skip-permissions "
+                  f"--strict-mcp-config --mcp-config {side}/mcp.json --disable-slash-commands "
+                  f"--setting-sources project")
+        transcript = f"ls -t ~/.claude/projects/*{rid}*/*.jsonl | head -1"
+        verify = ["In the new session, before sending the prompt, type `/mcp`: "
+                  + ("only `kct` may be listed." if kct else "no servers may be listed.")]
+    elif harness == "codex-cli":
+        cfg = [f'model = "{model}"']
+        if kct:
+            cfg += ["", "[mcp_servers.kct]", f'command = "{Path.home() / ".local/bin/kct"}"', 'args = ["mcp", "serve"]']
+        out += ["### A2. Harness: Codex CLI, isolated", "",
+                "A clean `CODEX_HOME` holds only your login and this run's config. Your other MCP servers "
+                "(computer-use, node_repl, metta-pr-similarity), skills and AGENTS.md are left out:", "",
+                "```bash",
+                f"mkdir -p {side}/codex-home && cp ~/.codex/auth.json {side}/codex-home/ && chmod 600 {side}/codex-home/auth.json",
+                f"cat > {side}/codex-home/config.toml <<'TOML'", *cfg, "TOML",
+                f"CODEX_HOME={side}/codex-home codex mcp list   # " + ("only kct" if kct else "nothing listed"),
+                "```", ""]
+        path_prefix = f"PATH={'$HOME/.local/bin' if kct else side + '/bin'}:$PATH"
+        launch = (f"cd {ws} && {path_prefix} CODEX_HOME={side}/codex-home codex -m {model} "
+                  f"--dangerously-bypass-approvals-and-sandbox")
+        transcript = f"ls -t {side}/codex-home/sessions/*/*/*/*.jsonl | head -1"
+        verify = ["In the new session, before sending the prompt, type `/mcp`: "
+                  + ("only `kct` may be listed." if kct else "no servers may be listed.")]
+    else:
+        launch, transcript, verify = "<launch the harness in the workspace>", "<path to session log>", []
+
+    out += ["### A3. Pre-flight checks", "",
+            "```bash",
+            f"ls {ws}                       # boards/  deliverables/  PROMPT.md   (nothing else visible)",
+            f"ls {ws}/boards | wc -l        # 10",
+            f"find {ws}/deliverables -type f | wc -l   # 0",
+            f"ls ~/.claude/CLAUDE.md ~/.codex/AGENTS.md 2>/dev/null   # global instruction files would leak in: move them aside for the run",
+            "```", "",
+            "- Run conditions **one at a time**. A running agent can read the filesystem, including sibling workspaces "
+            "and this repo's other branches. `bench/finish` scans the transcript for any access to other runs, "
+            "pcba-bench itself or kicad-tools `boards/`, and such a run is disqualified.",
+            "- For the strongest isolation, run under a dedicated macOS user account that holds only the workspace "
+            "and the harness login.",
+            "",
+            "## Phase B: the run", "",
+            "1. Open a terminal and launch a **fresh** session:", "",
+            "   ```bash", f"   {launch}", "   ```", ""]
+    out += [f"   {v}" for v in verify] + [""] if verify else []
+    out += ["2. Send the contents of `PROMPT.md` as the first message, verbatim, and **in the same moment** start "
+            "the clock in a second terminal:", "",
+            "   ```bash", f"   ~/GitHub/pcba-bench/bench/finish {rid} --mark-start", "   ```", "",
+            "   It prints the deadline.",
+            "3. Until the deadline, the only message you may send is the continue prompt below. Send it whenever the "
+            "agent stops early, with `{REMAINING}` filled in. Don't answer questions, approve anything, or give "
+            "hints.", "",
+            "   ```text", *[f"   {line}" for line in cont.splitlines()], "   ```", "",
+            "4. **At the deadline, stop the agent** (Ctrl-C or Esc) and exit the session.", "",
+            "## Phase C: submit", "",
+            "```bash",
+            f"cd ~/GitHub/pcba-bench && git switch {branch}",
+            f"T=$({transcript})",
+            f"bench/finish {rid} --transcript \"$T\" --continues <number of continue prompts sent>",
+            f"git push origin {branch} {jbranch}",
+            "```", "",
+            "`bench/finish` copies `deliverables/` and the transcript, runs the leak scan and commits "
+            "`Submission " + rid + "`, and creates `" + jbranch + "` at the same commit. Give the judges "
+            "**only** `" + jbranch + "` (JUDGING.md, `prompts/judge-session.md`), never `" + branch + "`.", ""]
+    return "\n".join(out)
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("run_id")
+    ap.add_argument("--model-id", help="exact model ID, if run.json's agent string lacks it")
+    args = ap.parse_args()
+    run_path = REPO / "submissions" / args.run_id / "run.json"
+    if not run_path.is_file():
+        sys.exit(f"no {run_path}; is run/{args.run_id} checked out?")
+    run = json.loads(run_path.read_text())
+    out = run_path.parent / "TEST_INSTRUCTIONS.md"
+    out.write_text(render(run, args.model_id))
+    print(f"wrote {out}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

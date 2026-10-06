@@ -73,6 +73,11 @@ def main() -> int:
 
     text = args.transcript.read_text(errors="replace")
     hits = sorted({m.group(0)[:160] for pat in LEAK_PATTERNS for m in pat.finditer(text)})
+    # Other runs and this repository live on the same host: any access to them is a leak.
+    others = {m.group(0) for m in re.finditer(r"run--[0-9a-f]{8}", text)} - {args.run_id}
+    hits += sorted(f"references another run: {o}" for o in others)
+    hits += sorted({f"references the pcba-bench repository: {m.group(0)[:120]}"
+                    for m in re.finditer(r"GitHub/pcba-bench[^\s\"']*|pcba-bench/submissions[^\s\"']*", text)})
     # A bare-track run must not use the kicad-tools CLI or MCP server, which may be
     # installed on the same host for other tracks and for judges.
     if run.get("track") == "bare":
@@ -104,7 +109,13 @@ def main() -> int:
             # Neutral message, no trailers: the commit must not identify the agent (blinding).
             subprocess.run(["git", "-C", str(REPO), "add", "--", str(out.relative_to(REPO))], check=True)
             subprocess.run(["git", "-C", str(REPO), "commit", "-q", "-m", f"Submission {args.run_id}"], check=True)
-            print(f"committed on {branch}; now open this branch in each judge's harness (JUDGING.md)")
+            # Judges work on an opaque alias of this commit, so the operator's readable
+            # branch name (e.g. test-opus-kct) never reaches them.
+            judge_branch = f"judge/{args.run_id}"
+            subprocess.run(["git", "-C", str(REPO), "branch", "-f", judge_branch, "HEAD"], check=True)
+            print(f"committed on {branch}; judge branch {judge_branch} created at the same commit")
+            print(f"push both:  git push origin {branch} {judge_branch}")
+            print(f"then open {judge_branch} in each judge's harness (JUDGING.md)")
     if hits:
         print("WARNING: transcript scan found possible protocol violations (PROTOCOL.md §7):")
         for h in hits:
