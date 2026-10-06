@@ -73,6 +73,13 @@ def main() -> int:
 
     text = args.transcript.read_text(errors="replace")
     hits = sorted({m.group(0)[:160] for pat in LEAK_PATTERNS for m in pat.finditer(text)})
+    # A bare-track run must not use the kicad-tools CLI or MCP server, which may be
+    # installed on the same host for other tracks and for judges.
+    if run.get("track") == "bare":
+        tool_use = sorted({m.group(0)[:80] for m in re.finditer(
+            r"(?<![\w/-])kct\s+[a-z][\w-]*|mcp__kct__\w+|kicad_tools\.\w+", text)})
+        if tool_use:
+            hits += [f"bare track used kicad-tools: {t}" for t in tool_use[:20]]
     run["leak_scan"] = {"hits": hits, "clean": not hits}
 
     out = REPO / "submissions" / args.run_id
@@ -99,7 +106,7 @@ def main() -> int:
             subprocess.run(["git", "-C", str(REPO), "commit", "-q", "-m", f"Submission {args.run_id}"], check=True)
             print(f"committed on {branch}; now open this branch in each judge's harness (JUDGING.md)")
     if hits:
-        print("WARNING: transcript references the kicad-tools reference designs (PROTOCOL.md §7):")
+        print("WARNING: transcript scan found possible protocol violations (PROTOCOL.md §7):")
         for h in hits:
             print(f"  {h}")
     if run["over_deadline"]:

@@ -107,7 +107,8 @@ A run is disqualified if any of these is true:
 - the agent received any message other than the two allowed prompts;
 - the transcript shows it accessed an existing design of the benchmark boards, including the `boards/` tree of `rjwalters/kicad-tools`, upstream or in a local checkout (`bench/finish` scans the transcript for this);
 - a deliverable was modified after the deadline;
-- the supplement breaks §3.
+- the supplement breaks §3;
+- the agent used a tool its supplement doesn't declare. A bare-track run that calls `kct` or its MCP tools is the usual case, and `bench/finish` flags it.
 
 Maintainers audit transcripts before merging a result PR.
 
