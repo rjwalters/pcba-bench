@@ -1,0 +1,93 @@
+#!/usr/bin/env python3
+"""Mark a judge session's start, or collect its validated judgement (JUDGING.md).
+
+    judging/finish-judging <workspace-id> --mark-start
+    judging/finish-judging <workspace-id> --transcript session.jsonl
+
+Collected files land in judging/responses/<run-id>/:
+    <vendor>.json             the judgement (the input to judging/score)
+    <vendor>.meta.json        judge, model, harness, prompt hash, timing
+    <vendor>.transcript.*     the judge session log, for audit
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import shutil
+import sys
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+REPO = HERE.parent
+sys.path.insert(0, str(HERE))
+import judgement  # noqa: E402
+
+
+def now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("workspace_id")
+    ap.add_argument("--runs-dir", type=Path, default=Path.home() / "pcba-bench-judging")
+    ap.add_argument("--mark-start", action="store_true")
+    ap.add_argument("--transcript", type=Path)
+    ap.add_argument("--continues", type=int, help="number of judge-continue prompts sent")
+    args = ap.parse_args()
+
+    runs_dir = args.runs_dir.expanduser().resolve()
+    ws = runs_dir / args.workspace_id
+    meta_path = runs_dir / ".meta" / f"{args.workspace_id}.json"
+    if not meta_path.is_file():
+        sys.exit(f"no judge workspace {args.workspace_id}")
+    meta = json.loads(meta_path.read_text())
+
+    if args.mark_start:
+        if meta["started_at"]:
+            sys.exit(f"already started at {meta['started_at']}")
+        meta["started_at"] = now()
+        meta_path.write_text(json.dumps(meta, indent=2) + "\n")
+        end = datetime.fromisoformat(meta["started_at"]) + timedelta(minutes=meta["minutes"])
+        print(f"started {meta['started_at']}; deadline {end.isoformat(timespec='seconds')}")
+        return 0
+
+    if not meta["started_at"]:
+        sys.exit("judge session was never started (--mark-start)")
+    if args.transcript is None or not args.transcript.is_file():
+        sys.exit("--transcript is required")
+    path = ws / "judgement.json"
+    try:
+        out = json.loads(path.read_text())
+    except (OSError, ValueError) as exc:
+        sys.exit(f"no valid judgement.json: {exc}")
+    problems = judgement.validate(out, judgement.requirement_ids(ws / "inputs" / "requirements.toml"))
+    if problems:
+        sys.exit("judgement.json is invalid; record this judge as failed and re-run it:\n"
+                 + "\n".join(f"- {p}" for p in problems))
+
+    meta["finished_at"] = now()
+    elapsed = (datetime.fromisoformat(meta["finished_at"]) - datetime.fromisoformat(meta["started_at"]))
+    meta["elapsed_minutes"] = round(elapsed.total_seconds() / 60, 1)
+    meta["over_deadline"] = meta["elapsed_minutes"] > meta["minutes"] + 1
+    meta["continue_prompts_sent"] = args.continues
+
+    dest = REPO / "judging" / "responses" / meta["run_id"]
+    dest.mkdir(parents=True, exist_ok=True)
+    vendor = meta["vendor"]
+    if (dest / f"{vendor}.json").exists():
+        sys.exit(f"{dest / (vendor + '.json')} already exists; remove it to replace this judge's result")
+    (dest / f"{vendor}.json").write_text(json.dumps(out, indent=2) + "\n")
+    (dest / f"{vendor}.meta.json").write_text(json.dumps(meta, indent=2) + "\n")
+    shutil.copy2(args.transcript, dest / f"{vendor}.transcript{args.transcript.suffix}")
+    meta_path.write_text(json.dumps(meta, indent=2) + "\n")
+    print(f"collected: {dest / (vendor + '.json')}")
+    if meta["over_deadline"]:
+        print(f"WARNING: collected {meta['elapsed_minutes']} min after start (allotment {meta['minutes']})")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

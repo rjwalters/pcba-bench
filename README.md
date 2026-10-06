@@ -9,7 +9,7 @@ pcba-bench has ten boards, ranging from a single LED to a BLDC motor controller,
 - a BOM with orderable JLCPCB/LCSC parts, and a CPL;
 - a `DECISIONS.md`.
 
-Submissions are scored on a six-part rubric by **three judge models from three different vendors**, working blind from a deterministic evidence pack (KiCad ERC/DRC, copper-vs-schematic comparison, BOM resolution, renders). The per-criterion median is the official score. A separate **Manufacturable** flag records whether the board would pass fab with no further work.
+Submissions are scored on a six-part rubric by **three judge models from three different vendors** (Claude Opus 5.5, GPT-6 Astra and GLM-5.3), each running in its own native harness and working blind from a deterministic evidence pack (KiCad ERC/DRC, copper-vs-schematic comparison, BOM resolution, renders). The per-criterion median is the official score. A separate **Manufacturable** flag records whether the board would pass fab with no further work.
 
 Each submission is an **agent + toolkit** pair, and any pairs can be compared. For example, a bare agent with only `kicad-cli` (say, Claude Opus 5.5 as-is) can go up against a different agent with a declared toolkit (say, Codex Astra 6.1 + some electronics toolkit). The leaderboard keys every row by agent, model version and toolkit, so it can answer "which agent is best on its own" and "how much does toolkit X add", alongside cross-pair comparisons.
 
@@ -47,16 +47,17 @@ The fork workflow is in [PROTOCOL.md](PROTOCOL.md):
 - the input sets, the prompts, the rubric and the judging procedure;
 - the run scripts `bench/start` and `bench/finish`;
 - the evidence-pack generator `judging/package`;
-- the grader mutation self-test `judging/selftest`, which currently catches all 8 planted defect classes.
+- the grader mutation self-test `judging/selftest`, which currently catches all 8 planted defect classes;
+- native-harness judging (`judging/start-judging` and `judging/finish-judging`, with the judge prompts in `prompts/`);
+- the score aggregator `judging/score`, which also has an optional API mode.
 
 Not built yet:
 
-- the judge runner and score aggregator (`judging/score`);
-- a pinned judge panel;
+- a harness for the GLM-5.3 judge;
 - a reference container image (pinned KiCad 10);
 - a non-benchmark clean fixture for the self-test.
 
-Until those land, submissions can be collected and evidence-packed, but not scored.
+Submissions can be collected, evidence-packed and judged end to end today.
 
 ## Provenance
 

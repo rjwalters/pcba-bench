@@ -8,7 +8,7 @@ Produces <out>/<run-id>/ with:
     evidence/   erc.json drc.json (submitter rules) drc_fab.json (grader fab rules; gates)
                 fab_rules_applied.json lvs.json bom_resolution.json cpl.json fab.json
                 stats.json summary.json (incl. the Manufacturable flag)
-    design/     blinded text copies of schematic, PCB, BOM, CPL, DECISIONS.md
+    deliverable/ blinded copy of the whole deliverable (text scrubbed; zips scrubbed inside)
     renders/    schematic pages, PCB layers and 3D views as PNG
 
 Every step is deterministic given the same deliverable, kicad-cli version and
@@ -55,7 +55,7 @@ DRILL_EXT = {".drl", ".xln", ".exc", ".txt"}
 REDACTIONS = [
     (re.compile(r"(?im)^.*(generated|created|written|produced) (with|by) .*$"), "[redacted]"),
     (re.compile(r"(?im)^co-authored-by:.*$"), "[redacted]"),
-    (re.compile(r"\((generator|generator_version)\s+\"?[^)]*\)"), r"(\1 \"redacted\")"),
+    (re.compile(r"\((generator|generator_version)\s+\"?[^)]*\)"), r'(\1 "redacted")'),
     (re.compile(r"(?i)\b(claude(?:[- ]code)?|anthropic|openai|chatgpt|gpt-?\d[\w.-]*|codex|gemini|"
                 r"google deepmind|kicad-tools|kicad_tools|circuit-skills|kicad-happy)\b"), "[tool]"),
     (re.compile(r"(?<![\w-])kct(?![\w-])"), "[tool]"),
@@ -600,15 +600,29 @@ def main() -> int:
         if not args.no_renders:
             commands += renders(cli, w_sch, w_pcb, pcb["copper_layers"] if pcb else [], out / "renders")
 
-    design = out / "design"
-    design.mkdir(parents=True, exist_ok=True)
-    for src, name in ((sch, "board.kicad_sch"), (pcb_file, "board.kicad_pcb"), (bom, "bom.csv"),
-                      (cpl, "cpl.csv"), (decisions, "DECISIONS.md")):
-        if src:
-            (design / name).write_text(blind(src.read_text(errors="replace")))
-    for page in (deliv.glob("*.kicad_sch")):
-        if sch and page != sch:
-            (design / page.name).write_text(blind(page.read_text(errors="replace")))
+    # Blinded copy of the whole deliverable: judges in a native harness can open
+    # it with kicad-cli themselves. Text files are scrubbed, binaries copied as-is.
+    blinded = out / "deliverable"
+    for src in sorted(deliv.rglob("*")):
+        if not src.is_file():
+            continue
+        dst = blinded / src.relative_to(deliv)
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        if src.suffix.lower() == ".zip":
+            with zipfile.ZipFile(src) as zin, zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as zout:
+                for item in zin.infolist():
+                    data = zin.read(item)
+                    try:
+                        data = blind(data.decode("utf-8")).encode("utf-8")
+                    except UnicodeDecodeError:
+                        pass
+                    zout.writestr(item.filename, data)
+            continue
+        raw = src.read_bytes()
+        try:
+            dst.write_text(blind(raw.decode("utf-8")))
+        except UnicodeDecodeError:
+            dst.write_bytes(raw)
 
     erc_errors = count_violations(erc, "violations") if erc else None
     if erc and "sheets" in erc:
