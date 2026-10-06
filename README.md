@@ -4,14 +4,14 @@
 
 pcba-bench has ten boards, ranging from a single LED to a BLDC motor controller, an SDRAM tester and a USB-C PD supply. Each one is a short customer brief plus numbered requirements. The agent gets the brief, a declared set of tools and a fixed time budget, and nothing else. It must deliver:
 
-- a KiCad 9 schematic and PCB;
+- a KiCad 10 schematic and PCB;
 - Gerbers and drill files;
 - a BOM with orderable JLCPCB/LCSC parts, and a CPL;
 - a `DECISIONS.md`.
 
 Submissions are scored on a six-part rubric by **three judge models from three different vendors**, working blind from a deterministic evidence pack (KiCad ERC/DRC, copper-vs-schematic comparison, BOM resolution, renders). The per-criterion median is the official score. A separate **Manufacturable** flag records whether the board would pass fab with no further work.
 
-The benchmark compares *agent + tools* combinations, for example a bare agent with only `kicad-cli` against the same agent with an electronics toolkit.
+Each submission is an **agent + toolkit** pair, and any pairs can be compared. For example, a bare agent with only `kicad-cli` (say, Claude Opus 5.5 as-is) can go up against a different agent with a declared toolkit (say, Codex Astra 6.1 + some electronics toolkit). The leaderboard keys every row by agent, model version and toolkit, so it can answer "which agent is best on its own" and "how much does toolkit X add", alongside cross-pair comparisons.
 
 ## Boards
 
@@ -45,16 +45,18 @@ The fork workflow is in [PROTOCOL.md](PROTOCOL.md):
 **v0, protocol draft.** The following exist now:
 
 - the input sets, the prompts, the rubric and the judging procedure;
-- `bench/start` and `bench/finish`.
+- the run scripts `bench/start` and `bench/finish`;
+- the evidence-pack generator `judging/package`;
+- the grader mutation self-test `judging/selftest`, which currently catches all 8 planted defect classes.
 
 Not built yet:
 
-- the evidence-pack generator (`judging/package`);
-- the score aggregator (`judging/score`);
+- the judge runner and score aggregator (`judging/score`);
 - a pinned judge panel;
-- a reference container image.
+- a reference container image (pinned KiCad 10);
+- a non-benchmark clean fixture for the self-test.
 
-Until those land, submissions can be collected but not scored.
+Until those land, submissions can be collected and evidence-packed, but not scored.
 
 ## Provenance
 

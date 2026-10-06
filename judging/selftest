@@ -1,0 +1,279 @@
+#!/usr/bin/env python3
+"""Grader mutation self-test (JUDGING.md): planted defects must fail the gates.
+
+    judging/selftest <clean-submission-dir> [--no-network]
+
+Packages the clean submission (which must come out Manufacturable), then
+applies each mutation to a copy and asserts that the expected gate flips and
+that Manufacturable becomes false. A grader that lets a planted defect through
+is broken, whatever it reports on real submissions.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import math
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import uuid
+from collections import Counter
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+
+
+def spans(text: str, head: str) -> list[tuple[int, int]]:
+    """(start, end) of every balanced `(head ...)` form, outermost occurrences only."""
+    out, i = [], 0
+    pat = re.compile(r"\(" + re.escape(head) + r"[\s)]")
+    while (m := pat.search(text, i)):
+        depth, j, in_str = 0, m.start(), False
+        while j < len(text):
+            c = text[j]
+            if in_str:
+                if c == "\\":
+                    j += 1
+                elif c == '"':
+                    in_str = False
+            elif c == '"':
+                in_str = True
+            elif c == "(":
+                depth += 1
+            elif c == ")":
+                depth -= 1
+                if depth == 0:
+                    break
+            j += 1
+        out.append((m.start(), j + 1))
+        i = j + 1
+    return out
+
+
+NET_RE = re.compile(r'\(net\s+(?:\d+\s+)?"([^"]*)"\s*\)')
+# Tracks, vias and zones may reference nets by number only: `(net 2)`.
+NET_ANY_RE = re.compile(r'\(net\s+(?:(\d+)\s*(?:"([^"]*)")?|"([^"]*)")\s*\)')
+
+
+def net_table(text: str) -> dict[str, str]:
+    """Top-level `(net N "name")` declarations, number -> name."""
+    return {m.group(1): m.group(2) for m in re.finditer(r'^\s*\(net\s+(\d+)\s+"([^"]*)"\s*\)', text, re.M)}
+
+
+def item_net(block: str, table: dict[str, str]) -> tuple[str | None, re.Match | None]:
+    m = NET_ANY_RE.search(block)
+    if not m:
+        return None, None
+    if m.group(1) is not None:
+        return (m.group(2) if m.group(2) is not None else table.get(m.group(1))), m
+    return m.group(3), m
+
+
+def net_ref(name: str, table: dict[str, str], like: re.Match) -> str:
+    """Spell a reference to `name` the way the matched form did."""
+    if like.group(1) is not None:
+        num = next(k for k, v in table.items() if v == name)
+        return f'(net {num} "{name}")' if like.group(2) is not None else f"(net {num})"
+    return f'(net "{name}")'
+
+
+def pcb_path(d: Path) -> Path:
+    return d / "deliverable" / "board.kicad_pcb"
+
+
+def m_swap_pad_nets(d: Path) -> None:
+    p = pcb_path(d)
+    text = p.read_text()
+    for s, e in spans(text, "footprint"):
+        fp = text[s:e]
+        pads = [(ps, pe) for ps, pe in spans(fp, "pad")]
+        nets = [(NET_RE.search(fp[ps:pe]), ps) for ps, pe in pads]
+        nets = [(m, ps) for m, ps in nets if m]
+        names = {m.group(0) for m, _ in nets}
+        if len(nets) >= 2 and len(names) >= 2:
+            (m1, o1), (m2, o2) = nets[0], next((n for n in nets[1:] if n[0].group(0) != nets[0][0].group(0)))
+            a, b = m1.group(0), m2.group(0)
+            spots = sorted([(o1 + m1.start(), o1 + m1.end(), b), (o2 + m2.start(), o2 + m2.end(), a)], reverse=True)
+            for st, en, rep in spots:
+                fp = fp[:st] + rep + fp[en:]
+            p.write_text(text[:s] + fp + text[e:])
+            return
+    raise RuntimeError("no footprint with two differently-netted pads")
+
+
+def busiest_routed_net(text: str) -> str:
+    table = net_table(text)
+    counts = Counter()
+    for s, e in spans(text, "segment") + spans(text, "arc"):
+        name, _ = item_net(text[s:e], table)
+        if name:
+            counts[name] += 1
+    if not counts:
+        raise RuntimeError("board has no routed segments")
+    return counts.most_common(1)[0][0]
+
+
+def m_unroute_net(d: Path) -> None:
+    p = pcb_path(d)
+    text = p.read_text()
+    net = busiest_routed_net(text)
+    table = net_table(text)
+    for s, e in sorted(spans(text, "segment") + spans(text, "arc") + spans(text, "via"), reverse=True):
+        if item_net(text[s:e], table)[0] == net:
+            text = text[:s] + text[e:]
+    # Also drop that net's zones so a pour can't silently reconnect it.
+    for s, e in sorted(spans(text, "zone"), reverse=True):
+        name = item_net(text[s:e], table)[0]
+        nm = re.search(r'\(net_name\s+"([^"]*)"', text[s:e])
+        if name == net or (nm and nm.group(1) == net):
+            text = text[:s] + text[e:]
+    p.write_text(text)
+
+
+def m_remove_footprint(d: Path) -> None:
+    p = pcb_path(d)
+    text = p.read_text()
+    s, e = spans(text, "footprint")[0]
+    p.write_text(text[:s] + text[e:])
+
+
+def _xy(block: str, key: str = "at") -> tuple[float, float, float] | None:
+    m = re.search(r"\(" + key + r"\s+(-?[\d.]+)\s+(-?[\d.]+)(?:\s+(-?[\d.]+))?", block)
+    return (float(m.group(1)), float(m.group(2)), float(m.group(3) or 0)) if m else None
+
+
+def m_short(d: Path) -> None:
+    """Draw a new track between two pads of one footprint that sit on different nets.
+
+    The short must be geometric: KiCad 10 re-derives a track's net from the copper
+    it touches, so merely relabelling an existing track's net is not a defect.
+    """
+    p = pcb_path(d)
+    text = p.read_text()
+    for s, e in spans(text, "footprint"):
+        fp = text[s:e]
+        fat = _xy(fp)
+        if fat is None or not re.search(r'\(layer\s+"F\.Cu"\)', fp[:400]):
+            continue
+        pads = []
+        for ps, pe in spans(fp, "pad"):
+            pad = fp[ps:pe]
+            net = NET_RE.search(pad)
+            pat = _xy(pad)
+            on_front = re.search(r'"(F\.Cu|\*\.Cu)"', pad)
+            if net and net.group(1) and pat and on_front:
+                pads.append((net.group(1), pat))
+        for i in range(len(pads)):
+            for j in range(i + 1, len(pads)):
+                if pads[i][0] != pads[j][0]:
+                    th = math.radians(fat[2])
+
+                    def board_xy(local):
+                        dx, dy = local[0], local[1]
+                        return (fat[0] + dx * math.cos(th) + dy * math.sin(th),
+                                fat[1] - dx * math.sin(th) + dy * math.cos(th))
+
+                    (x1, y1), (x2, y2) = board_xy(pads[i][1]), board_xy(pads[j][1])
+                    seg = (f'\t(segment\n\t\t(start {x1:.4f} {y1:.4f})\n\t\t(end {x2:.4f} {y2:.4f})\n'
+                           f'\t\t(width 0.25)\n\t\t(layer "F.Cu")\n\t\t(net "{pads[i][0]}")\n'
+                           f'\t\t(uuid "{uuid.uuid4()}")\n\t)\n')
+                    cut = text.rstrip().rfind(")")
+                    p.write_text(text[:cut] + seg + text[cut:])
+                    return
+    raise RuntimeError("no front-side footprint with two differently-netted pads")
+
+
+def m_short_and_hide(d: Path) -> None:
+    """Short, then try to hide it by relaxing the submitter's own rules and severities."""
+    m_short(d)
+    pro = d / "deliverable" / "board.kicad_pro"
+    data = json.loads(pro.read_text()) if pro.is_file() else {"meta": {"version": 1}}
+    ds = data.setdefault("board", {}).setdefault("design_settings", {})
+    ds["rule_severities"] = {k: "ignore" for k in (
+        "shorting_items", "clearance", "tracks_crossing", "unconnected_items", "copper_edge_clearance",
+        "track_width", "via_diameter", "annular_width", "hole_clearance", "net_conflict")}
+    ds.setdefault("rules", {})["min_clearance"] = 0.0
+    pro.write_text(json.dumps(data, indent=2))
+
+
+def m_bad_lcsc(d: Path) -> None:
+    p = d / "deliverable" / "fab" / "bom.csv"
+    text = p.read_text()
+    new, n = re.subn(r"\bC\d{2,9}\b", "C99999999", text, count=1)
+    if not n:
+        raise RuntimeError("no LCSC code in BOM")
+    p.write_text(new)
+
+
+def m_no_gerbers(d: Path) -> None:
+    fab = d / "deliverable" / "fab"
+    for f in fab.iterdir():
+        if f.name not in ("bom.csv", "cpl.csv"):
+            shutil.rmtree(f) if f.is_dir() else f.unlink()
+
+
+def m_no_pcb(d: Path) -> None:
+    pcb_path(d).unlink()
+
+
+# mutation -> (gate, predicate on the gate value)
+MUTATIONS = {
+    "swap_pad_nets": (m_swap_pad_nets, "lvs_matches", lambda v: v is False),
+    "unroute_net": (m_unroute_net, "unconnected_items", lambda v: isinstance(v, int) and v > 0),
+    "remove_footprint": (m_remove_footprint, "lvs_matches", lambda v: v is False),
+    "short": (m_short, "drc_errors", lambda v: isinstance(v, int) and v > 0),
+    "short_and_hide": (m_short_and_hide, "drc_errors", lambda v: isinstance(v, int) and v > 0),
+    "bad_lcsc": (m_bad_lcsc, "bom_resolved", lambda v: v is False),
+    "no_gerbers": (m_no_gerbers, "fab_outputs_complete", lambda v: v is False),
+    "no_pcb": (m_no_pcb, "pcb_present", lambda v: v is False),
+}
+
+
+def package(sub: Path, out: Path, network: bool) -> dict:
+    cmd = [sys.executable, str(HERE / "package"), str(sub), "-o", str(out), "--no-renders"]
+    if not network:
+        cmd.append("--no-network")
+    subprocess.run(cmd, check=True, capture_output=True, text=True)
+    return json.loads((out / sub.name / "evidence" / "summary.json").read_text())
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("clean", type=Path)
+    ap.add_argument("--no-network", action="store_true", help="skip bad_lcsc (needs catalog lookups)")
+    args = ap.parse_args()
+    network = not args.no_network
+
+    with tempfile.TemporaryDirectory(prefix="pcba-selftest-") as tmp:
+        tmp = Path(tmp)
+        base = package(args.clean.resolve(), tmp / "out", network)
+        if not base["manufacturable"] and not (args.no_network and not base["gates"]["bom_resolved"]):
+            print("baseline is not Manufacturable; selftest needs a clean submission")
+            print(json.dumps(base["gates"], indent=2))
+            return 2
+        failures = 0
+        for name, (mutate, gate, ok) in MUTATIONS.items():
+            if name == "bad_lcsc" and not network:
+                print(f"SKIP {name} (no network)")
+                continue
+            sub = tmp / name
+            shutil.copytree(args.clean, sub)
+            try:
+                mutate(sub)
+            except RuntimeError as exc:
+                print(f"SKIP {name}: {exc}")
+                continue
+            summary = package(sub, tmp / "out", network)
+            value = summary["gates"].get(gate)
+            passed = ok(value) and summary["manufacturable"] is False
+            failures += not passed
+            print(f"{'PASS' if passed else 'FAIL'} {name}: {gate}={value!r} manufacturable={summary['manufacturable']}")
+        print(f"\n{len(MUTATIONS)} mutations, {failures} failed")
+        return 1 if failures else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

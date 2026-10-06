@@ -1,0 +1,39 @@
+# JLCPCB standard-process minimums the grader enforces in its own DRC pass
+# (`evidence/drc_fab.json`). The grader takes, for each rule, the STRICTER of
+# this value and the submitter's own board setting. It also resets rule
+# severities and DRC exclusions to KiCad defaults, so a submission can't pass
+# fab DRC by relaxing its own rules.
+#
+# Source: https://jlcpcb.com/capabilities/pcb-capabilities (1 oz copper),
+# as recorded in kicad-tools' manufacturer profile, last verified 2026-01-16.
+# Keys are KiCad `.kicad_pro` board.design_settings.rules names, in mm.
+
+[layers.2]
+min_track_width = 0.127
+min_clearance = 0.127
+min_via_hole = 0.3
+min_via_diameter = 0.6
+min_via_annular_width = 0.15
+min_through_hole_diameter = 0.3
+min_hole_to_hole = 0.5
+min_copper_edge_clearance = 0.3
+
+[layers.4]
+min_track_width = 0.1016
+min_clearance = 0.1016
+min_via_hole = 0.2
+min_via_diameter = 0.45
+min_via_annular_width = 0.10
+min_through_hole_diameter = 0.2
+min_hole_to_hole = 0.5
+min_copper_edge_clearance = 0.3
+
+[layers.6]
+min_track_width = 0.0889
+min_clearance = 0.0889
+min_via_hole = 0.2
+min_via_diameter = 0.45
+min_via_annular_width = 0.15
+min_through_hole_diameter = 0.2
+min_hole_to_hole = 0.5
+min_copper_edge_clearance = 0.3

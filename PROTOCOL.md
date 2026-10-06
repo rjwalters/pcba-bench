@@ -18,7 +18,7 @@ The agent's workspace contains these files, copied from `boards/<id>/`, **and no
 
 The environment also provides:
 
-- KiCad 9 (`kicad-cli` plus the standard symbol, footprint and 3D libraries), the same version for every track;
+- KiCad 10 (`kicad-cli` plus the standard symbol, footprint and 3D libraries), the same version for every track;
 - whatever the submitter's **tools supplement** declares.
 
 The workspace must be created **outside** your fork's checkout (`bench/start` does this), so the agent can't see other boards, other submissions, or this repo's history.
@@ -36,7 +36,7 @@ Nothing else may be sent: no corrections, hints, grades, error excerpts or appro
 
 Your supplement describes the tools available in your environment, using `prompts/tools/TEMPLATE.md` (600 words max). Write one supplement per **track**, and use the same text for all ten boards. Two reference supplements ship with the benchmark:
 
-- `prompts/tools/bare.md`: KiCad 9 CLI, Python, web.
+- `prompts/tools/bare.md`: KiCad 10 CLI, Python, web.
 - `prompts/tools/kicad-tools.md`: bare plus kicad-tools.
 
 A supplement must not contain design advice, board-specific content, or pointers to existing designs.

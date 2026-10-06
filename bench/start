@@ -19,7 +19,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 INPUT_FILES = ("BRIEF.md", "requirements.toml", "board.toml")
 MARKER = "---- TOOLS SUPPLEMENT"
-PROMPT_VERSION = 1
+PROMPT_VERSION = 2
 
 
 def sha256(path: Path) -> str:

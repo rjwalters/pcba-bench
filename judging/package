@@ -1,0 +1,666 @@
+#!/usr/bin/env python3
+"""Build the blinded evidence pack judges receive for one submission (JUDGING.md).
+
+    judging/package submissions/<run-id> [-o judging/out] [--no-network]
+
+Produces <out>/<run-id>/ with:
+    inputs/     BRIEF.md, requirements.toml, board.toml for the board
+    evidence/   erc.json drc.json (submitter rules) drc_fab.json (grader fab rules; gates)
+                fab_rules_applied.json lvs.json bom_resolution.json cpl.json fab.json
+                stats.json summary.json (incl. the Manufacturable flag)
+    design/     blinded text copies of schematic, PCB, BOM, CPL, DECISIONS.md
+    renders/    schematic pages, PCB layers and 3D views as PNG
+
+Every step is deterministic given the same deliverable, kicad-cli version and
+parts-catalog responses (cached in <out>/.parts-cache.json). The grader never
+imports agent-side tooling; it uses kicad-cli and its own parsers only.
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import io
+import json
+import math
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import tomllib
+import urllib.request
+import zipfile
+from collections import defaultdict
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import sexpr  # noqa: E402
+
+REPO = Path(__file__).resolve().parent.parent
+PACKAGE_VERSION = 1
+PINNED_KICAD_MAJOR = 10  # PROTOCOL.md §2: one KiCad version for every track
+CLI_TIMEOUT = 600
+KICAD_CLI_CANDIDATES = (
+    "/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli",
+    "/usr/bin/kicad-cli",
+    "/usr/local/bin/kicad-cli",
+)
+GERBER_EXT = {".gbr", ".gtl", ".gbl", ".gto", ".gbo", ".gts", ".gbs", ".gtp", ".gbp",
+              ".gko", ".gm1", ".gml", ".gg1", ".gg2", ".g1", ".g2", ".g3", ".g4"}
+DRILL_EXT = {".drl", ".xln", ".exc", ".txt"}
+
+# Blinding: identity markers an agent or its tools may leave in files.
+REDACTIONS = [
+    (re.compile(r"(?im)^.*(generated|created|written|produced) (with|by) .*$"), "[redacted]"),
+    (re.compile(r"(?im)^co-authored-by:.*$"), "[redacted]"),
+    (re.compile(r"\((generator|generator_version)\s+\"?[^)]*\)"), r"(\1 \"redacted\")"),
+    (re.compile(r"(?i)\b(claude(?:[- ]code)?|anthropic|openai|chatgpt|gpt-?\d[\w.-]*|codex|gemini|"
+                r"google deepmind|kicad-tools|kicad_tools|circuit-skills|kicad-happy)\b"), "[tool]"),
+    (re.compile(r"(?<![\w-])kct(?![\w-])"), "[tool]"),
+]
+
+
+# --------------------------------------------------------------------- utils
+
+def find_kicad_cli() -> str:
+    env = os.environ.get("KICAD_CLI")
+    if env:
+        return env
+    found = shutil.which("kicad-cli")
+    if found:
+        return found
+    for cand in KICAD_CLI_CANDIDATES:
+        if Path(cand).is_file():
+            return cand
+    sys.exit("kicad-cli not found (set KICAD_CLI)")
+
+
+def run(cmd: list[str], cwd: Path | None = None) -> dict:
+    try:
+        p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=CLI_TIMEOUT)
+        return {"cmd": cmd[1:], "returncode": p.returncode, "stderr": p.stderr[-2000:]}
+    except subprocess.TimeoutExpired:
+        return {"cmd": cmd[1:], "returncode": None, "stderr": f"timeout after {CLI_TIMEOUT}s"}
+
+
+def load_json(path: Path) -> dict | None:
+    try:
+        return json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def write_json(path: Path, data) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2, sort_keys=True, ensure_ascii=False) + "\n")
+
+
+def blind(text: str) -> str:
+    for pattern, repl in REDACTIONS:
+        text = pattern.sub(repl, text)
+    return text
+
+
+def locate(deliv: Path, name: str, pattern: str, notes: list[str]) -> Path | None:
+    exact = deliv / name
+    if exact.is_file():
+        return exact
+    hits = sorted(p for p in deliv.glob(pattern) if p.is_file())
+    if len(hits) == 1:
+        notes.append(f"expected {name}, found {hits[0].relative_to(deliv)} (non-standard name)")
+        return hits[0]
+    if hits:
+        notes.append(f"expected {name}, found {len(hits)} candidates; none used")
+    return None
+
+
+# ------------------------------------------------------------ PCB / netlist
+
+def footprint_ref(fp) -> str | None:
+    for prop in sexpr.children(fp, "property"):
+        if len(prop) >= 3 and prop[1] == "Reference":
+            return prop[2]
+    for txt in sexpr.children(fp, "fp_text"):
+        if len(txt) >= 3 and txt[1] == "reference":
+            return txt[2]
+    return None
+
+
+def net_name(node) -> str | None:
+    """Pad net: KiCad <=9 `(net 3 "GND")`, KiCad 10 may use `(net "GND")`."""
+    if node is None or len(node) < 2:
+        return None
+    return node[-1] if isinstance(node[-1], str) else None
+
+
+def parse_pcb(path: Path) -> dict:
+    root = sexpr.parse(path.read_text())
+    copper = []
+    layers = sexpr.child(root, "layers")
+    if layers:
+        copper = [entry[1] for entry in layers[1:]
+                  if isinstance(entry, list) and len(entry) > 1 and str(entry[1]).endswith(".Cu")]
+
+    footprints, pad_nets = [], defaultdict(dict)  # ref -> {pad: net}
+    for fp in sexpr.children(root, "footprint"):
+        ref = footprint_ref(fp)
+        at = sexpr.floats(sexpr.child(fp, "at"), 2)
+        layer = sexpr.child(fp, "layer")
+        attr = sexpr.child(fp, "attr")
+        footprints.append({
+            "ref": ref, "footprint": fp[1] if len(fp) > 1 else None,
+            "at": at, "side": "bottom" if layer and layer[1] == "B.Cu" else "top",
+            "attrs": attr[1:] if attr else [],
+        })
+        for pad in sexpr.children(fp, "pad"):
+            num = pad[1] if len(pad) > 1 else ""
+            if num == "":
+                continue
+            nn = net_name(sexpr.child(pad, "net"))
+            if ref:
+                # Multiple pads may share a number (thermal or castellated); keep any net.
+                pad_nets[ref].setdefault(num, nn)
+                if nn and not pad_nets[ref][num]:
+                    pad_nets[ref][num] = nn
+
+    xs, ys = [], []
+    for item in root:
+        h = sexpr.head(item)
+        if h not in ("gr_line", "gr_rect", "gr_arc", "gr_circle", "gr_poly"):
+            continue
+        layer = sexpr.child(item, "layer")
+        if not layer or layer[1] != "Edge.Cuts":
+            continue
+        if h == "gr_circle":
+            c = sexpr.floats(sexpr.child(item, "center"), 2)
+            e = sexpr.floats(sexpr.child(item, "end"), 2)
+            if c and e:
+                r = math.dist(c, e)
+                xs += [c[0] - r, c[0] + r]
+                ys += [c[1] - r, c[1] + r]
+            continue
+        for key in ("start", "mid", "end"):
+            pt = sexpr.floats(sexpr.child(item, key), 2)
+            if pt:
+                xs.append(pt[0])
+                ys.append(pt[1])
+        pts = sexpr.child(item, "pts")
+        if pts:
+            for xy in sexpr.children(pts, "xy"):
+                pt = sexpr.floats(xy, 2)
+                if pt:
+                    xs.append(pt[0])
+                    ys.append(pt[1])
+
+    track_len, segments, vias = 0.0, 0, 0
+    for item in root:
+        h = sexpr.head(item)
+        if h == "segment":
+            s = sexpr.floats(sexpr.child(item, "start"), 2)
+            e = sexpr.floats(sexpr.child(item, "end"), 2)
+            if s and e:
+                track_len += math.dist(s, e)
+                segments += 1
+        elif h == "arc":
+            s, m, e = (sexpr.floats(sexpr.child(item, k), 2) for k in ("start", "mid", "end"))
+            if s and m and e:
+                track_len += math.dist(s, m) + math.dist(m, e)
+                segments += 1
+        elif h == "via":
+            vias += 1
+
+    nets = {net_name(n) for n in sexpr.children(root, "net")} - {None, ""}
+    return {
+        "copper_layers": copper,
+        "footprints": footprints,
+        "pad_nets": pad_nets,
+        "board_mm": [round(max(xs) - min(xs), 3), round(max(ys) - min(ys), 3)] if xs else None,
+        "track_segments": segments,
+        "track_length_mm": round(track_len, 2),
+        "vias": vias,
+        "zones": sum(1 for _ in sexpr.children(root, "zone")),
+        "declared_nets": len(nets),
+    }
+
+
+def parse_netlist(path: Path) -> dict:
+    root = sexpr.parse(path.read_text())
+    comps = {}
+    for comp in sexpr.walk(root):
+        if sexpr.head(comp) == "comp":
+            ref = sexpr.child(comp, "ref")
+            fp = sexpr.child(comp, "footprint")
+            if ref and len(ref) > 1:
+                comps[ref[1]] = fp[1] if fp and len(fp) > 1 else ""
+    nets = {}
+    for net in sexpr.walk(root):
+        if sexpr.head(net) != "net" or sexpr.child(net, "node") is None:
+            continue
+        name = sexpr.child(net, "name")
+        nodes = set()
+        for node in sexpr.children(net, "node"):
+            ref, pin = sexpr.child(node, "ref"), sexpr.child(node, "pin")
+            if ref and pin:
+                nodes.add((ref[1], pin[1]))
+        nets[name[1] if name else f"?{len(nets)}"] = nodes
+    return {"components": comps, "nets": nets}
+
+
+def lvs(net: dict, pcb: dict) -> dict:
+    """Compare schematic connectivity to PCB pad-net assignment, by partition, not by name."""
+    sch_refs = {r for r in net["components"] if not r.startswith("#")}
+    pcb_refs = {f["ref"] for f in pcb["footprints"] if f["ref"]}
+    pad_to_net = {(ref, pad): n for ref, pads in pcb["pad_nets"].items() for pad, n in pads.items()}
+
+    split, missing_pads, merged = [], [], []
+    owner = {}  # pcb net -> schematic net that claimed it
+    for sname, nodes in sorted(net["nets"].items()):
+        on_board = {nd for nd in nodes if nd[0] in pcb_refs}
+        pcb_nets = {pad_to_net.get(nd) for nd in on_board}
+        absent = sorted(f"{r}.{p}" for r, p in on_board if (r, p) not in pad_to_net)
+        if absent:
+            missing_pads.append({"net": sname, "pads": absent})
+        real = {n for n in pcb_nets if n}
+        if len(nodes) >= 2 and (len(real) > 1 or (None in pcb_nets and real)):
+            split.append({"net": sname, "pcb_nets": sorted(n or "<no net>" for n in pcb_nets)})
+        for n in real:
+            if n in owner and owner[n] != sname and len(nodes) >= 1:
+                merged.append({"pcb_net": n, "schematic_nets": sorted({owner[n], sname})})
+            owner.setdefault(n, sname)
+
+    mismatches = len(split) + len(merged)
+    return {
+        "schematic_components": len(sch_refs),
+        "pcb_footprints": len(pcb_refs),
+        "missing_on_pcb": sorted(sch_refs - pcb_refs),
+        "extra_on_pcb": sorted(pcb_refs - sch_refs),
+        "split_nets": split,
+        "merged_nets": merged,
+        "pads_missing_on_pcb": missing_pads,
+        "net_mismatches": mismatches,
+        "matches": mismatches == 0 and not (sch_refs - pcb_refs),
+    }
+
+
+def fab_rules(fab: str, copper_layers: int) -> dict:
+    table = tomllib.loads((REPO / "judging" / "fab_rules" / f"{fab}.toml").read_text())["layers"]
+    tiers = sorted(int(k) for k in table)
+    tier = next((t for t in tiers if copper_layers <= t), tiers[-1])
+    return table[str(tier)]
+
+
+def strip_exclusions(node) -> None:
+    if isinstance(node, dict):
+        for key in list(node):
+            if "exclusion" in key.lower():
+                node[key] = []
+            else:
+                strip_exclusions(node[key])
+    elif isinstance(node, list):
+        for item in node:
+            strip_exclusions(item)
+
+
+def grader_project(pro_src: Path | None, dst: Path, rules: dict) -> dict:
+    """Write a .kicad_pro whose minimums are the stricter of submitter and fab, with default severities."""
+    pro = (load_json(pro_src) if pro_src else None) or {"meta": {"version": 1}}
+    ds = pro.setdefault("board", {}).setdefault("design_settings", {})
+    current = ds.setdefault("rules", {})
+    applied = {}
+    for key, floor in rules.items():
+        value = current.get(key)
+        applied[key] = max(floor, value) if isinstance(value, (int, float)) else floor
+        current[key] = applied[key]
+    overridden = ds.pop("rule_severities", None) or {}
+    strip_exclusions(pro)
+    dst.write_text(json.dumps(pro, indent=2))
+    return {"rules": applied, "submitter_severity_overrides_dropped": overridden}
+
+
+# ----------------------------------------------------------------- BOM / CPL
+
+def read_csv(path: Path) -> list[dict]:
+    text = path.read_text(encoding="utf-8-sig", errors="replace")
+    sample = text[:4096]
+    try:
+        dialect = csv.Sniffer().sniff(sample, delimiters=",;\t")
+    except csv.Error:
+        dialect = csv.excel
+    return [{(k or "").strip(): (v or "").strip() for k, v in row.items()}
+            for row in csv.DictReader(io.StringIO(text), dialect=dialect)]
+
+
+def pick(row: dict, *needles: str) -> str | None:
+    for key in row:
+        low = key.lower()
+        if any(n in low for n in needles):
+            return key
+    return None
+
+
+def split_refs(s: str) -> list[str]:
+    return [r for r in re.split(r"[\s,;]+", s) if r]
+
+
+def lcsc_lookup(code: str, cache: dict, network: bool) -> dict:
+    if code in cache:
+        return cache[code]
+    if not network:
+        return {"status": "not_checked"}
+    url = f"https://wmsc.lcsc.com/ftps/wm/product/detail?productCode={code}"
+    req = urllib.request.Request(url, headers={"User-Agent": "pcba-bench-grader/1"})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            data = json.load(resp)
+    except (OSError, ValueError) as exc:
+        return {"status": "lookup_failed", "error": str(exc)[:200]}
+    r = data.get("result")
+    if not r:
+        out = {"status": "not_found"}
+    else:
+        out = {"status": "found", "mpn": r.get("productModel"), "manufacturer": r.get("brandNameEn"),
+               "package": r.get("encapStandard"), "description": r.get("productNameEn"),
+               "lcsc_stock": r.get("stockNumber")}
+    cache[code] = out
+    return out
+
+
+def package_match(part_pkg: str | None, footprint: str | None) -> str:
+    if not part_pkg or not footprint:
+        return "unknown"
+    fp = footprint.lower()
+    tokens = [t for t in re.split(r"[^0-9a-z]+", part_pkg.lower()) if len(t) >= 3 or t.isdigit()]
+    if not tokens:
+        return "unknown"
+    return "match" if any(t in fp for t in tokens) else "check"
+
+
+def bom_evidence(bom_path: Path | None, net: dict | None, pcb: dict | None,
+                 cache: dict, network: bool) -> dict:
+    if not bom_path:
+        return {"present": False}
+    rows = read_csv(bom_path)
+    if not rows:
+        return {"present": True, "lines": 0, "resolved": False, "error": "empty or unparseable"}
+    k_code = pick(rows[0], "lcsc", "jlc", "part #", "supplier")
+    k_refs = pick(rows[0], "designator", "reference", "refs")
+    fp_by_ref = {f["ref"]: f["footprint"] for f in (pcb or {}).get("footprints", [])}
+    lines, bom_refs = [], set()
+    for row in rows:
+        refs = split_refs(row.get(k_refs, "")) if k_refs else []
+        bom_refs.update(refs)
+        code = (row.get(k_code) or "").strip().upper() if k_code else ""
+        valid = bool(re.fullmatch(r"C\d{2,9}", code))
+        info = lcsc_lookup(code, cache, network) if valid else {"status": "missing" if not code else "malformed"}
+        fps = sorted({fp_by_ref.get(r) or "" for r in refs} - {""})
+        lines.append({"refs": refs, "lcsc": code or None, **info,
+                      "footprints": fps,
+                      "package_vs_footprint": package_match(info.get("package"), fps[0] if fps else None)})
+    sch_refs = {r for r in (net or {}).get("components", {}) if not r.startswith("#")}
+    statuses = [ln["status"] for ln in lines]
+    return {
+        "present": True,
+        "columns": {"lcsc": k_code, "refs": k_refs},
+        "lines": len(lines),
+        "status_counts": {s: statuses.count(s) for s in sorted(set(statuses))},
+        "schematic_refs_not_in_bom": sorted(sch_refs - bom_refs),
+        "bom_refs_not_in_schematic": sorted(bom_refs - sch_refs) if sch_refs else [],
+        "resolved": bool(lines) and all(s == "found" for s in statuses),
+        "stock_note": "lcsc_stock is LCSC distribution stock, not JLCPCB assembly stock; advisory only",
+        "items": lines,
+    }
+
+
+def cpl_evidence(cpl_path: Path | None, pcb: dict | None) -> dict:
+    if not cpl_path:
+        return {"present": False}
+    rows = read_csv(cpl_path)
+    k_ref = pick(rows[0], "designator", "ref") if rows else None
+    refs = {row.get(k_ref, "") for row in rows} - {""} if k_ref else set()
+    smt = {f["ref"] for f in (pcb or {}).get("footprints", [])
+           if f["ref"] and "smd" in f["attrs"]}
+    return {"present": True, "rows": len(rows), "ref_column": k_ref,
+            "smd_footprints_not_in_cpl": sorted(smt - refs),
+            "cpl_refs_not_on_pcb": sorted(refs - {f["ref"] for f in (pcb or {}).get("footprints", [])})}
+
+
+def fab_evidence(deliv: Path) -> dict:
+    fab = deliv / "fab"
+    files = sorted(p for p in fab.rglob("*") if p.is_file()) if fab.is_dir() else []
+    # Fab houses accept a zip of Gerbers, so look inside archives too.
+    names = [str(p.relative_to(deliv)) for p in files]
+    for z in (p for p in files if p.suffix.lower() == ".zip"):
+        try:
+            with zipfile.ZipFile(z) as zf:
+                names += [f"{z.relative_to(deliv)}!{m}" for m in zf.namelist() if not m.endswith("/")]
+        except zipfile.BadZipFile:
+            names.append(f"{z.relative_to(deliv)}!<corrupt zip>")
+
+    def suffix(name: str) -> str:
+        return Path(name.split("!")[-1]).suffix.lower()
+
+    def is_drill(name: str) -> bool:
+        ext = suffix(name)
+        return ext in DRILL_EXT and (ext != ".txt" or re.search(r"drl|drill", name, re.I) is not None)
+
+    gerbers = [n for n in names if suffix(n) in GERBER_EXT]
+    drills = [n for n in names if is_drill(n)]
+    edge = [n for n in gerbers if re.search(r"edge|gko|gm1|outline", n.split("!")[-1], re.I)]
+    return {"files": names, "gerbers": gerbers, "drills": drills,
+            "has_outline_gerber": bool(edge),
+            "complete": bool(gerbers) and bool(drills) and bool(edge)}
+
+
+# ------------------------------------------------------------------- renders
+
+def renders(cli: str, sch: Path | None, pcb: Path | None, copper: list[str], out: Path) -> list[dict]:
+    out.mkdir(parents=True, exist_ok=True)
+    log = []
+    if sch:
+        pdf = out / "schematic.pdf"
+        log.append(run([cli, "sch", "export", "pdf", "-o", str(pdf), str(sch)]))
+        if pdf.is_file() and shutil.which("pdftoppm"):
+            log.append(run(["pdftoppm", "-png", "-r", "110", str(pdf), str(out / "schematic")]))
+    if pcb:
+        for side in ("top", "bottom"):
+            log.append(run([cli, "pcb", "render", "--side", side, "--quality", "basic",
+                            "-w", "1600", "-h", "1200", "-o", str(out / f"pcb-3d-{side}.png"), str(pcb)]))
+        # Layer plots go via PDF -> pdftoppm: ImageMagick often lacks an SVG delegate.
+        for layer in copper + ["Edge.Cuts"]:
+            stem = "pcb-" + layer.replace(".", "_")
+            pdf = out / f"{stem}.pdf"
+            layers = f"{layer},Edge.Cuts" if layer != "Edge.Cuts" else layer
+            log.append(run([cli, "pcb", "export", "pdf", "--layers", layers, "--mode-single",
+                            "-o", str(pdf), str(pcb)]))
+            if pdf.is_file() and shutil.which("pdftoppm"):
+                # High DPI because the PDF page is full-size; trim to the board afterwards.
+                log.append(run(["pdftoppm", "-png", "-r", "600", "-singlefile", str(pdf), str(out / stem)]))
+                pdf.unlink()
+                png = out / f"{stem}.png"
+                if png.is_file() and shutil.which("magick"):
+                    log.append(run(["magick", str(png), "-trim", "+repage", "-bordercolor", "white",
+                                    "-border", "40", "-resize", "2400x2400>", str(png)]))
+    return log
+
+
+# ---------------------------------------------------------------------- main
+
+def count_violations(report: dict | None, key: str, severity: str = "error") -> int | None:
+    if report is None:
+        return None
+    return sum(1 for v in report.get(key, []) if v.get("severity") == severity)
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("submission", type=Path)
+    ap.add_argument("-o", "--out", type=Path, default=REPO / "judging" / "out")
+    ap.add_argument("--no-network", action="store_true", help="skip LCSC lookups")
+    ap.add_argument("--no-renders", action="store_true")
+    args = ap.parse_args()
+
+    sub = args.submission.resolve()
+    run_meta = load_json(sub / "run.json") or {}
+    board_id = run_meta.get("board")
+    deliv = sub / "deliverable"
+    if not board_id or not deliv.is_dir():
+        sys.exit(f"{sub}: needs run.json with 'board' and a deliverable/ directory")
+    out = args.out.resolve() / sub.name
+    if out.exists():
+        shutil.rmtree(out)
+    ev = out / "evidence"
+    cli = find_kicad_cli()
+    version = subprocess.run([cli, "--version"], capture_output=True, text=True).stdout.strip()
+    notes: list[str] = []
+    if not version.startswith(f"{PINNED_KICAD_MAJOR}."):
+        notes.append(f"grader kicad-cli {version} is not the pinned major version {PINNED_KICAD_MAJOR}")
+
+    for name in ("BRIEF.md", "requirements.toml", "board.toml"):
+        (out / "inputs").mkdir(parents=True, exist_ok=True)
+        shutil.copy2(REPO / "boards" / board_id / name, out / "inputs" / name)
+    board = tomllib.loads((REPO / "boards" / board_id / "board.toml").read_text())
+
+    sch = locate(deliv, "board.kicad_sch", "*.kicad_sch", notes)
+    pcb_file = locate(deliv, "board.kicad_pcb", "*.kicad_pcb", notes)
+    bom = locate(deliv, "fab/bom.csv", "fab/*bom*.csv", notes)
+    cpl = locate(deliv, "fab/cpl.csv", "fab/*[cp][po][ls]*.csv", notes)
+    decisions = locate(deliv, "DECISIONS.md", "*ECISIONS*.md", notes)
+
+    commands = []
+    with tempfile.TemporaryDirectory(prefix="pcba-grade-") as tmp:
+        work = Path(tmp) / "deliverable"
+        shutil.copytree(deliv, work)  # kicad-cli may write caches; never touch the submission
+        w_sch = work / sch.relative_to(deliv) if sch else None
+        w_pcb = work / pcb_file.relative_to(deliv) if pcb_file else None
+
+        erc = drc = drc_fab = net = pcb = None
+        if w_sch:
+            commands.append(run([cli, "sch", "erc", "--format", "json", "--severity-all",
+                                 "-o", str(ev / "erc.json"), str(w_sch)]))
+            erc = load_json(ev / "erc.json")
+            netfile = Path(tmp) / "netlist.net"
+            commands.append(run([cli, "sch", "export", "netlist", "--format", "kicadsexpr",
+                                 "-o", str(netfile), str(w_sch)]))
+            if netfile.is_file():
+                net = parse_netlist(netfile)
+        if w_pcb:
+            commands.append(run([cli, "pcb", "drc", "--format", "json", "--severity-all",
+                                 "--refill-zones", "--schematic-parity", "--units", "mm",
+                                 "-o", str(ev / "drc.json"), str(w_pcb)]))
+            drc = load_json(ev / "drc.json")
+            try:
+                pcb = parse_pcb(w_pcb)
+            except (OSError, ValueError) as exc:
+                notes.append(f"PCB parse failed: {exc}")
+            # Second pass under grader-owned fab rules; this one gates (see fab_rules/).
+            fab_dir = Path(tmp) / "fab_drc"
+            fab_dir.mkdir()
+            shutil.copy2(w_pcb, fab_dir / "board.kicad_pcb")
+            if w_sch:
+                for page in w_sch.parent.glob("*.kicad_sch"):
+                    shutil.copy2(page, fab_dir / ("board.kicad_sch" if page == w_sch else page.name))
+            for dru in work.glob("*.kicad_dru"):
+                shutil.copy2(dru, fab_dir / "board.kicad_dru")
+            n_copper = len(pcb["copper_layers"]) if pcb else 2
+            fab_cfg = grader_project(next(iter(work.glob("*.kicad_pro")), None), fab_dir / "board.kicad_pro",
+                                     fab_rules(board["fab"], n_copper))
+            write_json(ev / "fab_rules_applied.json", fab_cfg)
+            commands.append(run([cli, "pcb", "drc", "--format", "json", "--severity-all",
+                                 "--refill-zones", "--schematic-parity", "--units", "mm",
+                                 "-o", str(ev / "drc_fab.json"), str(fab_dir / "board.kicad_pcb")]))
+            drc_fab = load_json(ev / "drc_fab.json")
+
+        lvs_report = lvs(net, pcb) if net and pcb else {"matches": False, "error": "schematic or PCB missing/unparseable"}
+        write_json(ev / "lvs.json", lvs_report)
+
+        cache_path = args.out.resolve() / ".parts-cache.json"
+        cache = load_json(cache_path) or {}
+        bom_report = bom_evidence(bom, net, pcb, cache, not args.no_network)
+        write_json(cache_path, cache)
+        write_json(ev / "bom_resolution.json", bom_report)
+        write_json(ev / "cpl.json", cpl_evidence(cpl, pcb))
+        fab = fab_evidence(deliv)
+        write_json(ev / "fab.json", fab)
+
+        stats = {}
+        if pcb:
+            stats = {k: pcb[k] for k in ("copper_layers", "board_mm", "track_segments",
+                                         "track_length_mm", "vias", "zones", "declared_nets")}
+            stats["footprints"] = len(pcb["footprints"])
+            stats["footprints_bottom"] = sum(1 for f in pcb["footprints"] if f["side"] == "bottom")
+            limit = board.get("max_board_mm")
+            stats["within_max_layers"] = len(pcb["copper_layers"]) <= board["max_layers"]
+            if limit and pcb["board_mm"]:
+                dims, lim = sorted(pcb["board_mm"]), sorted(limit)
+                stats["within_max_board_mm"] = dims[0] <= lim[0] + 0.01 and dims[1] <= lim[1] + 0.01
+        write_json(ev / "stats.json", stats)
+
+        if not args.no_renders:
+            commands += renders(cli, w_sch, w_pcb, pcb["copper_layers"] if pcb else [], out / "renders")
+
+    design = out / "design"
+    design.mkdir(parents=True, exist_ok=True)
+    for src, name in ((sch, "board.kicad_sch"), (pcb_file, "board.kicad_pcb"), (bom, "bom.csv"),
+                      (cpl, "cpl.csv"), (decisions, "DECISIONS.md")):
+        if src:
+            (design / name).write_text(blind(src.read_text(errors="replace")))
+    for page in (deliv.glob("*.kicad_sch")):
+        if sch and page != sch:
+            (design / page.name).write_text(blind(page.read_text(errors="replace")))
+
+    erc_errors = count_violations(erc, "violations") if erc else None
+    if erc and "sheets" in erc:
+        erc_errors = sum(1 for s in erc["sheets"] for v in s.get("violations", []) if v.get("severity") == "error")
+    drc_errors_as_submitted = count_violations(drc, "violations")
+    drc_errors = count_violations(drc_fab, "violations")
+    unconnected = len(drc_fab.get("unconnected_items", [])) if drc_fab else None
+    # Parity findings default to warning severity in KiCad, but any of them means
+    # the board disagrees with the schematic, so all severities count.
+    # `net_conflict` is excluded here: it also fires on name-only differences
+    # (`LED_ANODE` vs `/LED_ANODE`), and wrong-net pads are caught by lvs.json,
+    # which compares connectivity by partition, not by name.
+    parity_items = drc_fab.get("schematic_parity", []) if drc_fab else None
+    parity = sum(1 for v in parity_items if v.get("type") != "net_conflict") if drc_fab else None
+    net_name_conflicts = sum(1 for v in parity_items if v.get("type") == "net_conflict") if drc_fab else None
+    gates = {
+        "schematic_present": sch is not None,
+        "pcb_present": pcb_file is not None,
+        "erc_errors": erc_errors,
+        "drc_errors": drc_errors,
+        "drc_errors_as_submitted": drc_errors_as_submitted,
+        "unconnected_items": unconnected,
+        "schematic_parity_errors": parity,
+        "net_name_conflicts_info": net_name_conflicts,
+        "lvs_matches": lvs_report.get("matches", False),
+        "bom_resolved": bom_report.get("resolved", False),
+        "fab_outputs_complete": fab["complete"],
+        "cpl_present": cpl is not None,
+        "within_max_layers": stats.get("within_max_layers"),
+        "within_max_board_mm": stats.get("within_max_board_mm", True),
+    }
+    manufacturable = (
+        gates["schematic_present"] and gates["pcb_present"]
+        and erc_errors == 0 and drc_errors == 0 and unconnected == 0 and parity == 0
+        and gates["lvs_matches"] and gates["bom_resolved"] and gates["fab_outputs_complete"]
+        and gates["cpl_present"] and gates["within_max_layers"] is True and gates["within_max_board_mm"] is not False
+    )
+    write_json(ev / "summary.json", {
+        "package_version": PACKAGE_VERSION,
+        "kicad_cli_version": version,
+        "board": board_id,
+        "gates": gates,
+        "manufacturable": manufacturable,
+        "notes": notes,
+    })
+    # Command log is for maintainers; it can reveal file names, so keep it out of the judge bundle.
+    write_json(out.parent / f"{sub.name}.commands.json", commands)
+
+    print(f"evidence pack: {out}")
+    print(json.dumps({"manufacturable": manufacturable, **gates}, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
