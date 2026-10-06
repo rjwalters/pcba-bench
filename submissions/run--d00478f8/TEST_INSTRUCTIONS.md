@@ -4,15 +4,13 @@
 
 | | |
 |---|---|
-| Agent / model | codex-cli / sol |
+| Agent / model | codex-cli / gpt-6.1-sol |
 | Harness | codex-cli |
 | Toolkit | **bare** (`prompts/tools/bare.md`) |
 | Time | **60 minutes**, whole suite |
 | Operator branch | `test-sol-base` |
 | Judge branch | `judge/run--d00478f8` (created by `bench/finish`; the only branch judges see) |
 | Workspace | `~/pcba-bench-runs/run--d00478f8` |
-
-> **Model ID to confirm:** `sol` is a placeholder. Replace it with the exact model ID in the launch command below and in `submissions/run--d00478f8/run.json` before starting.
 
 ## How this works
 
@@ -47,7 +45,7 @@ A clean `CODEX_HOME` holds only your login and this run's config. Your other MCP
 ```bash
 mkdir -p ~/pcba-bench-runs/.run--d00478f8/codex-home && cp ~/.codex/auth.json ~/pcba-bench-runs/.run--d00478f8/codex-home/ && chmod 600 ~/pcba-bench-runs/.run--d00478f8/codex-home/auth.json
 cat > ~/pcba-bench-runs/.run--d00478f8/codex-home/config.toml <<'TOML'
-model = "sol"
+model = "gpt-6.1-sol"
 TOML
 CODEX_HOME=~/pcba-bench-runs/.run--d00478f8/codex-home codex mcp list   # nothing listed
 ```
@@ -69,7 +67,7 @@ ls ~/.claude/CLAUDE.md ~/.codex/AGENTS.md 2>/dev/null   # global instruction fil
 1. Open a terminal and launch a **fresh** session:
 
    ```bash
-   cd ~/pcba-bench-runs/run--d00478f8 && PATH=~/pcba-bench-runs/.run--d00478f8/bin:$PATH CODEX_HOME=~/pcba-bench-runs/.run--d00478f8/codex-home codex -m sol --dangerously-bypass-approvals-and-sandbox
+   cd ~/pcba-bench-runs/run--d00478f8 && PATH=~/pcba-bench-runs/.run--d00478f8/bin:$PATH CODEX_HOME=~/pcba-bench-runs/.run--d00478f8/codex-home codex -m gpt-6.1-sol --dangerously-bypass-approvals-and-sandbox
    ```
 
    In the new session, before sending the prompt, type `/mcp`: no servers may be listed.
