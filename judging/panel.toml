@@ -4,6 +4,11 @@
 # every submission.
 version = 1
 
+# Every judge's environment provides the same inspection tools: kicad-cli (KiCad 10) and
+# kicad-tools at this exact version on PATH (`uv tool install kicad-tools==0.22.0`).
+# judging/prepare refuses to start a judge session with a different version.
+kicad_tools_version = "0.22.0"
+
 [[judge]]
 vendor = "anthropic"
 model = "claude-opus-5-5"

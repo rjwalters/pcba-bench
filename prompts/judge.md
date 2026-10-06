@@ -27,10 +27,24 @@ Each `boards/<id>/` holds:
 
 At the top level are `RUBRIC.md` (the scoring rubric, with anchors and mandatory caps) and `check-judgement`, which validates your output.
 
+## Tools available to you
+
+- **`kicad-cli`** (KiCad 10): ERC, DRC, netlist and Gerber export, and renders.
+- **`kct`** (kicad-tools 0.22.0): inspection and checks that read and write KiCad files directly. Examples:
+  - `kct check <pcb> --mfr jlcpcb`: manufacturer DRC;
+  - `kct pcb summary` / `kct pcb nets` / `kct net-status`: board contents and routing completeness;
+  - `kct validate --sync <sch> <pcb>`: schematic↔PCB consistency;
+  - `kct detect-mistakes`: common design errors;
+  - `kct bom`: BOM inspection.
+
+  Run `kct --help` and `kct <cmd> --help`; most commands support `--format json`.
+
+These tools are inspection aids for confirming or investigating something. Run them only on a **copy** of a deliverable (for example `cp -r boards/<id>/deliverable /tmp/check-<id>`). Where they disagree with the evidence pack, the evidence pack is ground truth: it is what the rubric's caps are based on. A design is not better or worse for having been made with any particular tool.
+
 ## Your task, for each board
 
 1. Read its brief, its requirements and `RUBRIC.md`.
-2. Review the design. **Treat the evidence pack as ground truth.** You may also inspect the design yourself, for example by reading the files, viewing the renders, or running `kicad-cli` read-only commands on a *copy* of the deliverable, to understand or confirm something. Do not modify `deliverable/` or `evidence/`.
+2. Review the design. **Treat the evidence pack as ground truth.** You may also inspect the design yourself, for example by reading the files, viewing the renders, or running `kicad-cli` or `kct` on a *copy* of the deliverable, to understand or confirm something. Do not modify `deliverable/` or `evidence/`.
 3. Rate **every** requirement in its `requirements.toml` as `met`, `partial` or `unmet`, citing specific evidence (a file, a report field, a render or a command you ran).
 4. Score criteria A–F from `RUBRIC.md` as integers 0–4, using its anchors. Apply every mechanical cap the evidence triggers, and list the caps you applied.
 5. List every claim in its `deliverable/DECISIONS.md` that the evidence contradicts.

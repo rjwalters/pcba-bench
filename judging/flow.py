@@ -91,5 +91,15 @@ def run_grader(run_id: str, out_root: Path, local: bool = False) -> dict[str, Pa
     return bundles
 
 
+def kct_version() -> str | None:
+    """Version of the kicad-tools `kct` first on PATH, or None."""
+    exe = shutil.which("kct")
+    if not exe:
+        return None
+    out = subprocess.run([exe, "--version"], capture_output=True, text=True).stdout
+    m = re.search(r"(\d+\.\d+\.\d+)", out)
+    return m.group(1) if m else None
+
+
 def load_json(path: Path) -> dict:
     return json.loads(path.read_text()) if path.is_file() else {}

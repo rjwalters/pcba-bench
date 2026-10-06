@@ -43,6 +43,22 @@ Everything happens on one git branch, and no API tokens are needed. Agents and j
 3. **Submit.** `bench/finish` snapshots the deliverables and transcript and **commits** them to the branch.
 4. **Judge.** Open the same branch in each judge's harness (Claude Code, Codex CLI, opencode) and send the [judge session prompt](prompts/judge-session.md). Each judge commits its judgements. The last one to finish scores the run, adds its row to [results/RESULTS.md](results/RESULTS.md), and **opens the PR** to main.
 
+## First evaluation matrix
+
+Eight runs: four agents × two toolkits, one 60-minute suite run each.
+
+| Agent | Harness | bare | kicad-tools |
+|---|---|---|---|
+| Claude Opus 5.5 | Claude Code | planned | planned |
+| Claude Fable 5.1 | Claude Code | planned | planned |
+| Sol | Codex CLI | planned | planned |
+| GPT-6 Astra | Codex CLI | planned | planned |
+
+- **bare:** the agent with `kicad-cli`, Python and the web ([prompts/tools/bare.md](prompts/tools/bare.md)).
+- **kicad-tools:** bare plus the `kct` CLI and MCP server ([prompts/tools/kicad-tools.md](prompts/tools/kicad-tools.md)). The toolkit is identical for every agent, so harness-specific skills are excluded until kicad-tools ships them for every harness (kicad-tools#5951).
+
+Judges: Claude Opus 5.5 (Claude Code), GPT-6 Astra (Codex CLI) and GLM-5.3 (opencode). Each has `kicad-cli` and kicad-tools for inspection.
+
 ## Status
 
 **v0, protocol draft.** All of the following exists and has been tested end to end on a scratch clone:

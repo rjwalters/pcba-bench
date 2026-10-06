@@ -61,6 +61,8 @@ Each judge runs much like a benchmark run: a fresh session of its own native har
 
    `finalize` refuses judgements from any model other than the one the panel pins.
 
+**Judge environment.** Each judge's harness has `kicad-cli` (KiCad 10) and kicad-tools at the version pinned in `panel.toml` (`kicad_tools_version`, currently 0.22.0) on `PATH`, and `judging/prepare` refuses a mismatched version. These are inspection aids for confirming DRC, connectivity or BOM questions on a copy of a deliverable. The evidence pack stays ground truth, and every submission is inspected with the same tools whatever toolkit produced it.
+
 The workspace contains `boards/<id>/` for each attempted board, with `inputs/`, the blinded `deliverable/`, `evidence/`, `renders/` and `judgement.schema.json`, plus `RUBRIC.md`, `./check-judgement` and `JUDGE_PROMPT.md`, and nothing else. The judge may inspect a design itself, including running `kicad-cli` read-only on a copy, but the evidence pack is ground truth.
 
 Each board's `judgement.json` matches its `judgement.schema.json`:

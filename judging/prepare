@@ -39,6 +39,12 @@ def main() -> int:
     args = ap.parse_args()
 
     judge = flow.judge_entry(args.judge)
+    want = flow.panel().get("kicad_tools_version")
+    if want:
+        have = flow.kct_version()
+        if have != want:
+            sys.exit(f"judges need kicad-tools {want} on PATH (found {have or 'none'}): "
+                     f"`uv tool install --force kicad-tools=={want}`")
     sub = flow.submission_dir(args.run_id)
     if (sub / "judgements" / args.judge).is_dir():
         sys.exit(f"{args.judge} has already judged {args.run_id}")
@@ -80,6 +86,7 @@ def main() -> int:
         "evidence_sha256": {b: hashlib.sha256((ws / "boards" / b / "evidence" / "summary.json").read_bytes())
                             .hexdigest() for b in boards},
         "grader": "local" if args.local else flow.BASE_IMAGE,
+        "kicad_tools_version": want,
         "started_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "finished_at": None,
     }
