@@ -1,0 +1,8 @@
+schema = 1
+id = "05-bldc-motor-controller"
+title = "Sensored BLDC motor controller"
+fab = "jlcpcb"
+assembly = "jlcpcb-smt"
+max_layers = 4
+max_board_mm = [70, 90]
+difficulty_hint = "high"

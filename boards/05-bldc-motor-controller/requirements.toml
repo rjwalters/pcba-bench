@@ -1,0 +1,92 @@
+schema = 1
+
+[[requirement]]
+id = "R1"
+category = "electrical"
+must = true
+text = "Three half-bridge outputs drive the three motor phases from a 12-24 V bus at 0.5 A continuous and 1 A peak phase current."
+evidence = "Schematic: bridge/driver topology and the component voltage and current ratings in the BOM against 24 V and 1 A."
+
+[[requirement]]
+id = "R2"
+category = "electrical"
+must = true
+text = "An on-board programmable microcontroller reads all three Hall inputs and controls each half-bridge independently (PWM and enable for each phase)."
+evidence = "Schematic and netlist: Hall signals reach MCU inputs, and each phase's PWM and enable come from MCU outputs."
+
+[[requirement]]
+id = "R3"
+category = "electrical"
+must = true
+text = "Hardware current sensing with a comparator that signals a fault to an interrupt-capable MCU input at a nominal 1 A trip point, and a path for that fault to shut down the bridge."
+evidence = "Schematic: sense element, comparator threshold network (and the computed trip current in DECISIONS.md), fault net to the MCU interrupt pin, and the bridge enable/sleep control."
+
+[[requirement]]
+id = "R4"
+category = "interface"
+must = true
+text = "Hall sensor inputs accept 5 V logic, have pull-ups suitable for open-drain sensors, and the Hall connector supplies +5 V and ground to the sensors."
+evidence = "Schematic: Hall connector pinout, pull-up resistors, MCU input voltage tolerance at 5 V."
+
+[[requirement]]
+id = "R5"
+category = "power"
+must = true
+text = "The 12-24 V DC input has reverse-polarity protection, a fuse, a transient-voltage clamp and bulk capacitance rated for the 24 V bus with margin."
+evidence = "Schematic and BOM: protection components, their voltage/current ratings, and the bulk capacitor voltage rating and package."
+
+[[requirement]]
+id = "R6"
+category = "power"
+must = true
+text = "An on-board regulated 5 V rail powers the logic and supplies at least 20 mA to the Hall sensors, with the regulator within its thermal limits at 24 V input."
+evidence = "Schematic: regulator and its bypassing; DECISIONS.md load and dissipation estimate; PCB render: regulator thermal copper."
+
+[[requirement]]
+id = "R7"
+category = "interface"
+must = true
+text = "The microcontroller can be reprogrammed in-system through an on-board programming header."
+evidence = "Schematic and netlist: programming header connected to the MCU programming, reset, supply-sense and ground pins."
+
+[[requirement]]
+id = "R8"
+category = "interface"
+must = true
+text = "A RUN switch connector is provided, and the motor cannot run while the switch is open."
+evidence = "Schematic: RUN connector, its biasing (an open switch reads as stop), and its connection to the MCU."
+
+[[requirement]]
+id = "R9"
+category = "interface"
+must = true
+text = "An on-board adjustable control sets the speed demand as an analog voltage read by the microcontroller."
+evidence = "Schematic and BOM: adjustable component wired across a supply/ground with its wiper on an MCU analog input."
+
+[[requirement]]
+id = "R10"
+category = "electrical"
+must = true
+text = "A fault indicator LED is driven by the microcontroller."
+evidence = "Schematic: LED with series resistor on an MCU output; PCB render: LED with polarity mark."
+
+[[requirement]]
+id = "R11"
+category = "interface"
+must = true
+text = "There are separate connectors for DC input, the three motor phases, the Hall sensors, the RUN switch and programming."
+evidence = "Schematic and PCB render: five distinct connectors with labelled pin 1 and function."
+
+[[requirement]]
+id = "R12"
+category = "layout"
+must = true
+text = "Exposed-pad power packages are soldered with a thermal path into ground copper, and current-carrying copper is sized for the 1 A peak."
+evidence = "PCB render and board file: exposed-pad lands, thermal vias, pour connections and power trace widths."
+
+[[requirement]]
+id = "R13"
+category = "mechanical"
+must = true
+text = "The board is no larger than 70 x 90 mm and uses at most four copper layers, with 1 oz copper."
+evidence = "stats.json: board size and layer count; board file stackup copper thickness (35 um)."

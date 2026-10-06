@@ -1,0 +1,75 @@
+#!/usr/bin/env python3
+"""Mark a run's start, or snapshot it at the deadline into submissions/ (PROTOCOL.md §4–§6)."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import shutil
+import sys
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+
+
+def now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("run_id")
+    ap.add_argument("--runs-dir", type=Path, default=Path.home() / "pcba-bench-runs")
+    ap.add_argument("--mark-start", action="store_true", help="record the moment the initial prompt is sent")
+    ap.add_argument("--transcript", type=Path, help="full agent session log")
+    ap.add_argument("--continues", type=int, help="number of continue prompts sent")
+    ap.add_argument("--tokens", type=int, help="total tokens, if known")
+    ap.add_argument("--cost-usd", type=float, help="total cost, if known")
+    args = ap.parse_args()
+
+    ws = args.runs_dir.expanduser().resolve() / args.run_id
+    run_path = ws / ".run.json"
+    if not run_path.is_file():
+        sys.exit(f"no run at {ws}")
+    run = json.loads(run_path.read_text())
+
+    if args.mark_start:
+        if run["started_at"]:
+            sys.exit(f"already started at {run['started_at']}")
+        run["started_at"] = now()
+        run_path.write_text(json.dumps(run, indent=2) + "\n")
+        deadline = datetime.fromisoformat(run["started_at"]) + timedelta(minutes=run["minutes"])
+        print(f"started {run['started_at']}; deadline {deadline.isoformat(timespec='seconds')}")
+        return 0
+
+    if not run["started_at"]:
+        sys.exit("run was never started (--mark-start)")
+    if args.transcript is None or not args.transcript.is_file():
+        sys.exit("--transcript is required (PROTOCOL.md §6)")
+
+    run["finished_at"] = now()
+    started = datetime.fromisoformat(run["started_at"])
+    elapsed = (datetime.fromisoformat(run["finished_at"]) - started).total_seconds() / 60
+    run["elapsed_minutes"] = round(elapsed, 1)
+    run["over_deadline"] = elapsed > run["minutes"] + 1
+    run["continue_prompts_sent"] = args.continues
+    run["tokens"] = args.tokens
+    run["cost_usd"] = args.cost_usd
+
+    out = REPO / "submissions" / args.run_id
+    if out.exists():
+        sys.exit(f"{out} already exists")
+    shutil.copytree(ws / "deliverable", out / "deliverable")
+    shutil.copy2(ws / ".tools.md", out / "tools.md")
+    shutil.copy2(args.transcript, out / f"transcript{args.transcript.suffix}")
+    (out / "run.json").write_text(json.dumps(run, indent=2) + "\n")
+
+    print(f"submission: {out}")
+    if run["over_deadline"]:
+        print(f"WARNING: snapshot taken {elapsed:.0f} min after start (allotment {run['minutes']})")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

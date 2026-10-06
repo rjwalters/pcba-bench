@@ -1,0 +1,7 @@
+schema = 1
+id = "09-usbc-pd-power"
+title = "USB-C PD 5 V power supply"
+fab = "jlcpcb"
+assembly = "jlcpcb-smt"
+max_layers = 4
+difficulty_hint = "medium"

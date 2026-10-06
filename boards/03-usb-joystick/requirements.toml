@@ -1,0 +1,106 @@
+schema = 1
+
+[[requirement]]
+id = "R1"
+category = "electrical"
+must = true
+text = "The MCU has a native USB 2.0 full-speed device interface wired to the USB-C connector's D+/D- (both orientations' contacts connected)."
+evidence = "Schematic: MCU USB pins to both D+/D- contact pairs of the receptacle; MCU datasheet; netlist."
+
+[[requirement]]
+id = "R2"
+category = "electrical"
+must = true
+text = "The MCU clock source meets USB full-speed timing accuracy (crystal or USB-qualified equivalent), with load components per its datasheet."
+evidence = "Schematic clock circuit and load capacitor values; crystal/MCU datasheet reasoning in DECISIONS.md."
+
+[[requirement]]
+id = "R3"
+category = "interface"
+must = true
+text = "The USB-C receptacle is configured as a sink/device (CC pins terminated independently), so a host supplies VBUS over a C-to-C cable in either orientation."
+evidence = "Schematic CC1/CC2 terminations (for example a separate 5.1 kOhm pull-down on each); netlist."
+
+[[requirement]]
+id = "R4"
+category = "interface"
+must = true
+text = "A keyed 5-pin joystick connector has pin order 1 = 5 V, 2 = GND, 3 = X wiper, 4 = Y wiper, 5 = switch."
+evidence = "Schematic connector pin assignments; footprint and pin-1 marking on the PCB render; BOM connector type."
+
+[[requirement]]
+id = "R5"
+category = "electrical"
+must = true
+text = "The X and Y axes each go through a low-pass filter to an MCU ADC input with 10-bit or better resolution, suited to DC to 1 kHz signals."
+evidence = "Schematic RC (or equivalent) filter values and corner frequency; MCU ADC pins; datasheet ADC resolution."
+
+[[requirement]]
+id = "R6"
+category = "electrical"
+must = true
+text = "Four on-board tactile buttons and the joystick switch each connect to their own MCU digital input, and none floats when its switch is open."
+evidence = "Schematic: five switch inputs on distinct GPIOs with pull-ups or pull-downs (internal pulls need a note in DECISIONS.md)."
+
+[[requirement]]
+id = "R7"
+category = "interface"
+must = true
+text = "An on-board header allows the MCU firmware to be loaded and reloaded in-circuit."
+evidence = "Schematic programming/debug header wired to the MCU's programming pins per its datasheet."
+
+[[requirement]]
+id = "R8"
+category = "interface"
+must = false
+text = "A manual reset button is provided for the MCU."
+evidence = "Schematic reset circuit and switch."
+
+[[requirement]]
+id = "R9"
+category = "power"
+must = true
+text = "The board is USB bus powered and stays within 100 mA including the external joystick potentiometers. It works down to about 4.35 V at the connector after protection drops, and total capacitance directly on VBUS is below 10 uF."
+evidence = "Current and voltage budget in DECISIONS.md; MCU operating voltage at the chosen clock; fuse/protection resistance; sum of capacitors on the VBUS rail."
+
+[[requirement]]
+id = "R10"
+category = "power"
+must = true
+text = "USB D+/D- and VBUS have ESD protection, and VBUS has resettable over-current protection."
+evidence = "Schematic ESD device and resettable fuse (PTC or eFuse) on the VBUS path; PCB placement near the connector."
+
+[[requirement]]
+id = "R11"
+category = "layout"
+must = true
+text = "USB D+/D- are routed as a coupled, length-matched differential pair no longer than 50 mm, and the crystal connections are short."
+evidence = "PCB render of the USB pair and crystal area; track lengths; skew."
+
+[[requirement]]
+id = "R12"
+category = "layout"
+must = true
+text = "Analog joystick traces are kept away from USB and fast digital signals, over a continuous ground reference plane."
+evidence = "PCB layer renders; stackup; analog trace routing relative to the USB pair and crystal."
+
+[[requirement]]
+id = "R13"
+category = "mechanical"
+must = true
+text = "The board fits within 80 mm x 60 mm, has at most 4 copper layers, and has the USB-C receptacle at a board edge."
+evidence = "PCB Edge.Cuts dimensions; stackup; connector position on the PCB render."
+
+[[requirement]]
+id = "R14"
+category = "layout"
+must = true
+text = "The board is fully routed and DRC-clean against JLCPCB rules, with traces and clearances at least 0.15 mm and vias at least 0.3 mm in diameter, and its copper matches the schematic."
+evidence = "DRC report; PCB design rules; schematic-to-PCB netlist comparison."
+
+[[requirement]]
+id = "R15"
+category = "bom"
+must = true
+text = "All parts are RoHS-compliant, and every assembled part has an LCSC part number that JLCPCB can source. Any hand-soldered through-hole parts are identified."
+evidence = "bom.csv LCSC column; BOM resolution report; cpl.csv; DECISIONS.md."

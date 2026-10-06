@@ -1,0 +1,7 @@
+schema = 1
+id = "07-matchgroup-test"
+title = "SDRAM length-matched bus test vehicle"
+fab = "jlcpcb"
+assembly = "jlcpcb-smt"
+max_layers = 6
+difficulty_hint = "high"

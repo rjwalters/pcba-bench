@@ -1,0 +1,7 @@
+schema = 1
+id = "06-diffpair-test"
+title = "Four-channel LVDS link test coupon"
+fab = "jlcpcb"
+assembly = "jlcpcb-smt"
+max_layers = 4
+difficulty_hint = "low"

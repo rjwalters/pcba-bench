@@ -1,0 +1,8 @@
+schema = 1
+id = "02-charlieplex-led"
+title = "Charlieplexed 3x3 LED grid"
+fab = "jlcpcb"
+assembly = "jlcpcb-smt"
+max_layers = 2
+max_board_mm = [50, 55]
+difficulty_hint = "medium"

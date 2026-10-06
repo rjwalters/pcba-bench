@@ -1,0 +1,85 @@
+schema = 1
+
+[[requirement]]
+id = "R1"
+category = "electrical"
+must = true
+text = "The MCU is an STM32F103C8 (STM32F103C8T6 or a fully pin- and function-compatible variant)."
+evidence = "Schematic MCU symbol; BOM line and LCSC part number."
+
+[[requirement]]
+id = "R2"
+category = "electrical"
+must = true
+text = "Every MCU supply pin (VDD, VDDA, VBAT) and every ground pin (VSS, VSSA) is connected, each supply pin has local decoupling, and there is bulk capacitance on 3.3 V."
+evidence = "Schematic MCU power pins against the datasheet pinout; decoupling capacitors; PCB placement near the pins; netlist."
+
+[[requirement]]
+id = "R3"
+category = "electrical"
+must = true
+text = "An external 8 MHz crystal is connected to the HSE oscillator pins, with load capacitors sized for that crystal's load capacitance."
+evidence = "Schematic crystal and load capacitor values; load-capacitance calculation in DECISIONS.md; crystal datasheet."
+
+[[requirement]]
+id = "R4"
+category = "electrical"
+must = true
+text = "After reset the MCU boots from internal flash by default, and its boot pin(s) do not float."
+evidence = "Schematic BOOT0 (and BOOT1, if used) strapping."
+
+[[requirement]]
+id = "R5"
+category = "electrical"
+must = true
+text = "One user LED is driven by an MCU GPIO pin through a current limit."
+evidence = "Schematic LED, resistor and GPIO connection; LED current calculation."
+
+[[requirement]]
+id = "R6"
+category = "interface"
+must = true
+text = "A 6-pin, 2.54 mm pitch SWD header carries SWDIO, SWCLK, reset (NRST), 3.3 V target voltage and ground to the matching MCU pins, and sits at a board edge."
+evidence = "Schematic header pin assignments against the MCU datasheet; netlist; PCB render showing header position."
+
+[[requirement]]
+id = "R7"
+category = "interface"
+must = false
+text = "The SWD header also brings out SWO."
+evidence = "Schematic header pin connected to the MCU's SWO-capable pin (PB3)."
+
+[[requirement]]
+id = "R8"
+category = "power"
+must = true
+text = "The board takes 5 V (4.5 to 5.5 V, up to 500 mA) from a USB connector."
+evidence = "Schematic USB connector VBUS/GND to the regulator input; BOM connector."
+
+[[requirement]]
+id = "R9"
+category = "power"
+must = true
+text = "An on-board regulator makes 3.3 V (+/-5 %) at 300 mA or more with no more than 100 mV p-p ripple, with output capacitance meeting the regulator's stability requirement and thermal dissipation that is adequate at full load."
+evidence = "Schematic regulator and capacitors; regulator datasheet (pinout, accuracy, current, stability); dissipation estimate in DECISIONS.md."
+
+[[requirement]]
+id = "R10"
+category = "mechanical"
+must = true
+text = "The board outline fits within 60 mm x 40 mm and the PCB uses at most 2 copper layers."
+evidence = "PCB Edge.Cuts dimensions; outline Gerber; stackup."
+
+[[requirement]]
+id = "R11"
+category = "layout"
+must = true
+text = "The board is fully routed and DRC-clean against JLCPCB rules, with traces and clearances at least 0.15 mm, and its copper matches the schematic."
+evidence = "DRC report with zero errors and zero unconnected items; design rules; schematic-to-PCB netlist comparison."
+
+[[requirement]]
+id = "R12"
+category = "bom"
+must = true
+text = "All parts are widely available and RoHS-compliant, and every assembled part has an LCSC part number that JLCPCB can source."
+evidence = "bom.csv LCSC column; BOM resolution report (stock); cpl.csv."

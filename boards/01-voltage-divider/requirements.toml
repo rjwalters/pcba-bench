@@ -1,0 +1,71 @@
+schema = 1
+
+[[requirement]]
+id = "R1"
+category = "electrical"
+must = true
+text = "A passive resistive divider produces an output of 0.5 x the input (2.5 V nominal from 5 V)."
+evidence = "Schematic resistor values; ratio R_bottom / (R_top + R_bottom) = 0.5."
+
+[[requirement]]
+id = "R2"
+category = "electrical"
+must = true
+text = "The division ratio is set by fixed component values only, with no active or adjustable parts."
+evidence = "Schematic and BOM: only fixed resistors and connectors."
+
+[[requirement]]
+id = "R3"
+category = "interface"
+must = true
+text = "The input is a 2-pin, 2.54 mm pitch connector carrying 5 V and ground."
+evidence = "Schematic connector; PCB footprint pitch; netlist."
+
+[[requirement]]
+id = "R4"
+category = "interface"
+must = true
+text = "The output is a separate 2-pin, 2.54 mm pitch connector carrying the divided output and ground."
+evidence = "Schematic connector; PCB footprint pitch; netlist shows output on the divider midpoint."
+
+[[requirement]]
+id = "R5"
+category = "electrical"
+must = true
+text = "Input and output share one common ground."
+evidence = "Netlist: ground pins of both connectors on the same net."
+
+[[requirement]]
+id = "R6"
+category = "mechanical"
+must = true
+text = "The board outline fits within 30 mm x 25 mm."
+evidence = "PCB Edge.Cuts dimensions; outline Gerber."
+
+[[requirement]]
+id = "R7"
+category = "layout"
+must = true
+text = "The PCB uses at most 2 copper layers, all nets are completely routed, and DRC passes with JLCPCB rules."
+evidence = "PCB stackup; DRC report with zero errors and zero unconnected items."
+
+[[requirement]]
+id = "R8"
+category = "layout"
+must = true
+text = "No trace is narrower than 0.3 mm and no copper clearance is below 0.2 mm."
+evidence = "PCB track widths and design rules; DRC report."
+
+[[requirement]]
+id = "R9"
+category = "layout"
+must = true
+text = "The PCB copper connectivity matches the schematic netlist."
+evidence = "Schematic-to-PCB netlist comparison in the evidence pack."
+
+[[requirement]]
+id = "R10"
+category = "bom"
+must = true
+text = "All parts are RoHS-compliant, and every assembled part has an LCSC part number that JLCPCB can source."
+evidence = "bom.csv LCSC column; BOM resolution report; cpl.csv."

@@ -1,0 +1,15 @@
+# Judge panel, judging version 1. Three judges from three different vendors.
+# Pin exact model IDs. Changing any entry bumps `version` and re-scores every submission.
+version = 1
+
+[[judge]]
+vendor = "anthropic"
+model = "TBD"
+
+[[judge]]
+vendor = "openai"
+model = "TBD"
+
+[[judge]]
+vendor = "google"
+model = "TBD"

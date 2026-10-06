@@ -1,0 +1,78 @@
+schema = 1
+
+[[requirement]]
+id = "R1"
+category = "electrical"
+must = true
+text = "Four independent channels, each LVTTL input -> LVDS driver -> differential pair -> LVDS receiver -> LVTTL output."
+evidence = "Schematic and netlist: four driver/receiver chains, each from an input-header pin to an output-header pin."
+
+[[requirement]]
+id = "R2"
+category = "electrical"
+must = true
+text = "Each differential pair has a 100 ohm differential termination at its receiver input."
+evidence = "Schematic: termination resistor across each pair; PCB render: termination placed at the receiver end."
+
+[[requirement]]
+id = "R3"
+category = "electrical"
+must = true
+text = "An undriven channel input leaves its channel in a defined logic state."
+evidence = "Schematic: a bias (pull-up or pull-down) resistor on every channel input, or a cited driver-datasheet failsafe."
+
+[[requirement]]
+id = "R4"
+category = "power"
+must = true
+text = "The board is powered only by an external regulated 3.3 V supply through a dedicated 2-pin power connector."
+evidence = "Schematic: power connector feeding the 3.3 V rail; no other supply input."
+
+[[requirement]]
+id = "R5"
+category = "power"
+must = true
+text = "Every driver and receiver IC has local bypass capacitors, and the supply input has bulk capacitance."
+evidence = "Schematic and PCB render: bypass capacitors on each IC supply pin, placed close to the pin; bulk capacitor at the input."
+
+[[requirement]]
+id = "R6"
+category = "interface"
+must = true
+text = "Separate 2.54 mm pitch input and output headers carry the four channel inputs and four outputs, with a ground pin adjacent to every signal pin."
+evidence = "Schematic: header pinouts; PCB render: header footprints and pitch."
+
+[[requirement]]
+id = "R7"
+category = "layout"
+must = true
+text = "Each differential pair is designed to 100 ohm +/-15% differential impedance against a stated JLCPCB stackup."
+evidence = "DECISIONS.md: stackup, trace width and gap, and the calculated impedance; board file: matching stackup, pair width and gap."
+
+[[requirement]]
+id = "R8"
+category = "layout"
+must = true
+text = "The P and N traces of every pair are length-matched to within 0.1 mm."
+evidence = "Board file: per-net track lengths for each pair (and the length report in DECISIONS.md)."
+
+[[requirement]]
+id = "R9"
+category = "layout"
+must = true
+text = "Differential pairs are routed as coupled pairs over a continuous ground plane on an adjacent layer, with no splits or voids beneath them."
+evidence = "PCB per-layer renders: pair routing and the reference-plane copper under the pairs."
+
+[[requirement]]
+id = "R10"
+category = "documentation"
+must = true
+text = "DECISIONS.md records the stackup, the pair trace width and gap, the calculated differential impedance and the measured intra-pair skew."
+evidence = "DECISIONS.md, cross-checked against the board file."
+
+[[requirement]]
+id = "R11"
+category = "mechanical"
+must = true
+text = "The board uses at most four copper layers and only ordinary plated through vias (no blind, buried, micro or via-in-pad vias)."
+evidence = "stats.json: layer count and via types; board file: via definitions and positions relative to SMT pads."

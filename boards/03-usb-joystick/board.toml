@@ -1,0 +1,8 @@
+schema = 1
+id = "03-usb-joystick"
+title = "USB joystick controller"
+fab = "jlcpcb"
+assembly = "jlcpcb-smt"
+max_layers = 4
+max_board_mm = [80, 60]
+difficulty_hint = "high"

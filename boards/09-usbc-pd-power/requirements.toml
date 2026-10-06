@@ -1,0 +1,99 @@
+schema = 1
+
+[[requirement]]
+id = "R1"
+category = "interface"
+must = true
+text = "Power enters through a USB-C receptacle, and the board acts as a USB PD sink only."
+evidence = "Schematic: USB-C receptacle with CC lines to a PD sink controller; no source-role circuitry."
+
+[[requirement]]
+id = "R2"
+category = "electrical"
+must = true
+text = "The PD sink negotiates a 15 V or 20 V contract on its own, with no firmware or external host."
+evidence = "Schematic and DECISIONS.md: standalone PD controller and its configured sink profiles (cited from the datasheet)."
+
+[[requirement]]
+id = "R3"
+category = "electrical"
+must = true
+text = "VBUS reaches the converter only through an input switch controlled by the PD sink, after a contract has been negotiated."
+evidence = "Schematic: power switch between VBUS and the converter input, driven by the PD controller's power-path output."
+
+[[requirement]]
+id = "R4"
+category = "electrical"
+must = true
+text = "On ordinary 5 V USB input, with no higher-voltage contract, the converter stays disabled and there is no output."
+evidence = "Schematic and DECISIONS.md: enable/UVLO threshold calculation showing the converter off at 5 V input."
+
+[[requirement]]
+id = "R5"
+category = "power"
+must = true
+text = "A synchronous buck regulator produces 5 V at a 3 A target and covers the full input voltage of a 20 V contract, including tolerance."
+evidence = "Schematic and BOM: regulator, inductor and capacitor ratings; DECISIONS.md: output setpoint, inductor peak current and input-range calculations."
+
+[[requirement]]
+id = "R6"
+category = "electrical"
+must = true
+text = "The output current is measured through a shunt resistor with Kelvin connections, by a voltage/current monitor on I2C."
+evidence = "Schematic: shunt in the output path and monitor sense inputs; PCB render: separate Kelvin traces from the shunt sense pads."
+
+[[requirement]]
+id = "R7"
+category = "interface"
+must = true
+text = "A telemetry header provides ground, SCL, SDA, a 3.3 V reference observation pin and the PD-sink and monitor alert lines. The I2C bus is 3.3 V and reaches both the monitor and the PD sink."
+evidence = "Schematic and netlist: header pinout, I2C pull-ups to 3.3 V, and bus connections to both ICs."
+
+[[requirement]]
+id = "R8"
+category = "power"
+must = true
+text = "A separate on-board low-current 3.3 V rail powers the telemetry circuits and the I2C pull-ups."
+evidence = "Schematic: 3.3 V regulator and its loads."
+
+[[requirement]]
+id = "R9"
+category = "power"
+must = true
+text = "The input power path has overcurrent protection."
+evidence = "Schematic and BOM: fuse or equivalent in the VBUS path, and its rating."
+
+[[requirement]]
+id = "R10"
+category = "interface"
+must = true
+text = "The 5 V output is on a 2-pin connector rated for 3 A."
+evidence = "Schematic and BOM: output connector and its current rating."
+
+[[requirement]]
+id = "R11"
+category = "layout"
+must = true
+text = "The buck input switching loop is compact, the switch-node copper is small, and the feedback network is kept away from the switch node and the inductor."
+evidence = "PCB per-layer renders: input-capacitor/regulator loop, switch-node area and feedback routing."
+
+[[requirement]]
+id = "R12"
+category = "layout"
+must = true
+text = "Power copper and via arrays are sized for the 3 A output, with broad ground return copper."
+evidence = "Board file and renders: power trace widths, pours, via counts on the current paths; DECISIONS.md: current-capacity reasoning."
+
+[[requirement]]
+id = "R13"
+category = "mechanical"
+must = true
+text = "The board uses at most four copper layers and only ordinary plated through vias."
+evidence = "stats.json: layer count and via types."
+
+[[requirement]]
+id = "R14"
+category = "electrical"
+must = false
+text = "An LED indicates that the output is present."
+evidence = "Schematic: LED with series resistor on the output rail."

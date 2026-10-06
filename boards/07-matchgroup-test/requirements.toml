@@ -1,0 +1,99 @@
+schema = 1
+
+[[requirement]]
+id = "R1"
+category = "electrical"
+must = true
+text = "A microcontroller with an integrated SDRAM controller is fully connected (all address, bank, data, byte-mask, clock and command/control signals) to one 8 MiB, 16-bit-wide SDR SDRAM."
+evidence = "Schematic and netlist: MCU memory-controller pins to SDRAM pins, checked against both datasheets; BOM: memory density and width."
+
+[[requirement]]
+id = "R2"
+category = "electrical"
+must = true
+text = "The memory interface is designed to run at a 48 MHz SDRAM clock."
+evidence = "DECISIONS.md: clock plan and timing rationale; MCU/SDRAM speed grades in the BOM."
+
+[[requirement]]
+id = "R3"
+category = "electrical"
+must = true
+text = "The microcontroller boots unattended from internal flash at power-up, with reset and boot-mode pins biased accordingly."
+evidence = "Schematic: boot-mode pin bias and reset network."
+
+[[requirement]]
+id = "R4"
+category = "layout"
+must = true
+text = "The bus is routed as four match groups (lower byte + mask, upper byte + mask, address + bank, command/control + clock), each with an electrical-length spread of 5 mm or less, including via travel."
+evidence = "Length report in DECISIONS.md, cross-checked against board-file track and via lengths per net."
+
+[[requirement]]
+id = "R5"
+category = "layout"
+must = true
+text = "Every bus signal's electrical length is within 10 mm of the SDRAM clock's, and every bus trace is shorter than 120 mm."
+evidence = "Length report in DECISIONS.md; board-file per-net lengths."
+
+[[requirement]]
+id = "R6"
+category = "layout"
+must = true
+text = "Bus traces are 50 ohm +/-10% single-ended on every layer they use, calculated against a stated JLCPCB stackup."
+evidence = "DECISIONS.md: stackup and per-layer impedance calculation; board file: stackup and bus trace widths per layer."
+
+[[requirement]]
+id = "R7"
+category = "layout"
+must = true
+text = "Long data runs are separated from address/control runs (on different layers, or at least 5 mm apart on a shared layer), and the clock is spaced at least three trace widths from other signals."
+evidence = "PCB per-layer renders and board file: layer assignment of the groups and clock spacing."
+
+[[requirement]]
+id = "R8"
+category = "layout"
+must = true
+text = "The board has at most six copper layers, including a dedicated, unbroken ground plane and a dedicated 3.3 V plane, with no signal routing on either plane."
+evidence = "stats.json: layer count; PCB per-layer renders of the plane layers."
+
+[[requirement]]
+id = "R9"
+category = "power"
+must = true
+text = "The board runs from a regulated 5 V +/-5% input on a 2-pin connector, with on-board 3.3 V regulation, drawing 230 mA or less continuous at 0-30 C ambient, with the regulator within its thermal limits."
+evidence = "Schematic: input connector and regulator; DECISIONS.md: current budget and regulator dissipation/junction-temperature estimate."
+
+[[requirement]]
+id = "R10"
+category = "power"
+must = true
+text = "Every microcontroller and memory supply pin has its own local decoupling capacitor, and the MCU analog supply is filtered."
+evidence = "Schematic: a capacitor per supply pin and the analog supply filter; PCB render: capacitor placement close to the pins."
+
+[[requirement]]
+id = "R11"
+category = "interface"
+must = true
+text = "An SWD programming/debug header provides SWDIO, SWCLK, reset, ground and target-voltage sense."
+evidence = "Schematic and netlist: header pins to the MCU debug, reset and supply nets."
+
+[[requirement]]
+id = "R12"
+category = "interface"
+must = true
+text = "A 3.3 V logic-level UART header provides ground, TX and RX."
+evidence = "Schematic and netlist: header pins to MCU UART TX/RX and ground."
+
+[[requirement]]
+id = "R13"
+category = "interface"
+must = true
+text = "Two microcontroller-driven status LEDs indicate pass and fail."
+evidence = "Schematic: two LEDs with series resistors on MCU GPIOs; PCB render: polarity marks."
+
+[[requirement]]
+id = "R14"
+category = "mechanical"
+must = true
+text = "Only ordinary plated through vias are used (no blind, buried, micro or via-in-pad vias)."
+evidence = "Board file: via definitions; stats.json: via types."

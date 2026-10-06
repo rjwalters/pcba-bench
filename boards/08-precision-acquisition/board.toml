@@ -1,0 +1,7 @@
+schema = 1
+id = "08-precision-acquisition"
+title = "Four-channel precision acquisition"
+fab = "jlcpcb"
+assembly = "jlcpcb-smt"
+max_layers = 4
+difficulty_hint = "medium"

@@ -1,0 +1,99 @@
+#!/usr/bin/env python3
+"""Create an isolated run workspace for one board (PROTOCOL.md §2, §5).
+
+Copies only the board's input set into a directory outside the checkout,
+renders PROMPT.md (initial prompt + tools supplement) and records run.json.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import re
+import shutil
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+INPUT_FILES = ("BRIEF.md", "requirements.toml", "board.toml")
+MARKER = "---- TOOLS SUPPLEMENT"
+PROMPT_VERSION = 1
+
+
+def sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def strip_comment(text: str) -> str:
+    return re.sub(r"<!--.*?-->\s*", "", text, count=1, flags=re.S)
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--board", required=True, help="board id, e.g. 03-usb-joystick")
+    ap.add_argument("--track", required=True, help="track label, e.g. bare, kicad-tools")
+    ap.add_argument("--agent", required=True, help='agent + model, e.g. "claude-code 2.x / claude-opus-5-5"')
+    ap.add_argument("--tools", required=True, type=Path, help="tools supplement markdown")
+    ap.add_argument("--minutes", type=int, default=120)
+    ap.add_argument("--runs-dir", type=Path, default=Path.home() / "pcba-bench-runs")
+    args = ap.parse_args()
+
+    board_dir = REPO / "boards" / args.board
+    if not board_dir.is_dir():
+        sys.exit(f"unknown board: {args.board}")
+    tools = args.tools.resolve()
+    if not tools.is_file():
+        sys.exit(f"tools supplement not found: {tools}")
+
+    runs_dir = args.runs_dir.expanduser().resolve()
+    if runs_dir.is_relative_to(REPO):
+        sys.exit("--runs-dir must be outside the pcba-bench checkout (PROTOCOL.md §2)")
+
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    run_id = f"{args.board}--{args.track}--{stamp}"
+    ws = runs_dir / run_id
+    ws.mkdir(parents=True)
+    for name in INPUT_FILES:
+        shutil.copy2(board_dir / name, ws / name)
+    (ws / "deliverable").mkdir()
+
+    initial = strip_comment((REPO / "prompts/initial.md").read_text())
+    initial = (
+        initial.replace("{BOARD_ID}", args.board)
+        .replace("{RUN_ID}", run_id)
+        .replace("{MINUTES}", str(args.minutes))
+    )
+    head, _, _ = initial.partition(MARKER)
+    prompt = head.rstrip() + "\n\n" + strip_comment(tools.read_text()).strip() + "\n"
+    (ws / "PROMPT.md").write_text(prompt)
+    shutil.copy2(tools, ws / ".tools.md")
+
+    run = {
+        "schema": 1,
+        "run_id": run_id,
+        "board": args.board,
+        "track": args.track,
+        "agent": args.agent,
+        "minutes": args.minutes,
+        "prompt_version": PROMPT_VERSION,
+        "initial_prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
+        "continue_prompt_sha256": sha256(REPO / "prompts/continue.md"),
+        "tools_sha256": sha256(tools),
+        "inputs_sha256": {n: sha256(board_dir / n) for n in INPUT_FILES},
+        "started_at": None,
+        "finished_at": None,
+        "continue_prompts_sent": None,
+    }
+    (ws / ".run.json").write_text(json.dumps(run, indent=2) + "\n")
+
+    print(f"workspace: {ws}")
+    print(f"prompt:    {ws / 'PROMPT.md'}")
+    print("Launch the agent with this workspace as cwd, then record the start:")
+    print(f"  bench/finish {run_id} --mark-start")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

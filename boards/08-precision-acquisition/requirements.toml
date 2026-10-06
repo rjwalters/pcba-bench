@@ -1,0 +1,85 @@
+schema = 1
+
+[[requirement]]
+id = "R1"
+category = "electrical"
+must = true
+text = "Four differential input channels are sampled simultaneously at 8 kSPS per channel or faster."
+evidence = "Schematic and BOM: converter(s) with simultaneous sampling on four differential channels; DECISIONS.md: sample-rate configuration."
+
+[[requirement]]
+id = "R2"
+category = "interface"
+must = true
+text = "A microcontroller with native USB streams samples to the host. It may be on the board or an off-the-shelf module in sockets."
+evidence = "Schematic: MCU (or module socket) and its USB data connection to the USB connector."
+
+[[requirement]]
+id = "R3"
+category = "electrical"
+must = true
+text = "The converter's data, control, data-ready and reset/synchronisation signals are connected to the microcontroller, over a link with the bandwidth for four channels at 8 kSPS."
+evidence = "Schematic and netlist: converter digital pins to MCU pins; DECISIONS.md: transfer-budget calculation."
+
+[[requirement]]
+id = "R4"
+category = "electrical"
+must = true
+text = "A dedicated oscillator supplies the converter's clock."
+evidence = "Schematic: oscillator wired to the converter clock input, with its own decoupling."
+
+[[requirement]]
+id = "R5"
+category = "power"
+must = true
+text = "The board is powered from USB alone, with no second supply required or connected."
+evidence = "Schematic: every power rail traces back to USB VBUS."
+
+[[requirement]]
+id = "R6"
+category = "power"
+must = true
+text = "The converter's analog section has its own low-noise supply, separate from the digital supply, and every converter supply pin is bypassed locally."
+evidence = "Schematic: analog regulator/filter and the bypass capacitor on each converter supply pin; PCB render: bypass placement."
+
+[[requirement]]
+id = "R7"
+category = "interface"
+must = true
+text = "Each of the four differential inputs has its own connector and protection against overvoltage and ESD."
+evidence = "Schematic: input connectors and the protection components on every input leg."
+
+[[requirement]]
+id = "R8"
+category = "electrical"
+must = true
+text = "Every input has an RC filter network, matched between its P and N legs and from channel to channel."
+evidence = "Schematic and BOM: identical filter values and tolerances on all eight legs (differential and common-mode capacitors if used)."
+
+[[requirement]]
+id = "R9"
+category = "documentation"
+must = true
+text = "DECISIONS.md states the supported differential and common-mode input range, and justifies the protection, bias and filter values against it (leakage, source impedance, settling)."
+evidence = "DECISIONS.md, cross-checked against the schematic values."
+
+[[requirement]]
+id = "R10"
+category = "layout"
+must = true
+text = "One continuous, unsplit ground plane serves the whole board, with no splits under digital return paths."
+evidence = "PCB per-layer renders: ground plane continuity under the digital and analog traces."
+
+[[requirement]]
+id = "R11"
+category = "layout"
+must = true
+text = "The input, filter and converter circuitry is placed in its own region, away from the USB, the microcontroller and the clocks."
+evidence = "PCB render: placement regions and the routing of the analog and digital signals."
+
+[[requirement]]
+id = "R12"
+category = "mechanical"
+must = true
+text = "The board uses at most four copper layers and only ordinary plated through vias."
+evidence = "stats.json: layer count and via types."

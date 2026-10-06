@@ -1,0 +1,92 @@
+schema = 1
+
+[[requirement]]
+id = "R1"
+category = "electrical"
+must = true
+text = "The board has nine LEDs driven by charlieplexing from exactly four microcontroller GPIO lines."
+evidence = "Schematic: four matrix lines from MCU GPIO pins, each LED connected between two of them; netlist."
+
+[[requirement]]
+id = "R2"
+category = "electrical"
+must = true
+text = "Each of the nine LEDs sits on a distinct ordered pair of the four lines, so every LED is individually addressable."
+evidence = "Netlist: list the (anode line, cathode line) pair for each LED and check that all nine pairs are different."
+
+[[requirement]]
+id = "R3"
+category = "electrical"
+must = true
+text = "Current limiting is matched across all four lines, and peak LED current is no more than about 4.6 mA at 5 V."
+evidence = "Schematic resistor values and placement; calculation in DECISIONS.md using the LED's Vf."
+
+[[requirement]]
+id = "R4"
+category = "electrical"
+must = true
+text = "The microcontroller is an 8-bit AVR (ATtiny85-class) running from its internal clock, with local supply decoupling."
+evidence = "Schematic MCU symbol and decoupling capacitor(s) at its supply pin; BOM; PCB placement of the decoupling."
+
+[[requirement]]
+id = "R5"
+category = "electrical"
+must = true
+text = "The microcontroller reset line stays functional as reset and is pulled to its inactive level, not left floating."
+evidence = "Schematic: reset pin connection, pull-up, and ISP RESET pin."
+
+[[requirement]]
+id = "R6"
+category = "interface"
+must = true
+text = "A 6-pin 2 x 3, 2.54 mm AVR ISP header uses the standard pinout (1 MISO, 2 VCC, 3 SCK, 4 MOSI, 5 RESET, 6 GND), wired to the matching MCU pins."
+evidence = "Schematic header pin assignments against the MCU datasheet's serial-programming pins; PCB pin-1 marking."
+
+[[requirement]]
+id = "R7"
+category = "interface"
+must = true
+text = "Where an ISP signal shares an MCU pin with the LED matrix, the circuit still allows reliable in-circuit programming."
+evidence = "Schematic: isolation (for example series resistance) between shared ISP lines and the LEDs; reasoning in DECISIONS.md."
+
+[[requirement]]
+id = "R8"
+category = "power"
+must = true
+text = "The board runs from an externally regulated 3.3 V to 5.0 V supply on a 2-pin, 2.54 mm header, drawing no more than 100 mA."
+evidence = "Schematic power input; MCU and LED operating ranges; current budget in DECISIONS.md."
+
+[[requirement]]
+id = "R9"
+category = "layout"
+must = true
+text = "The nine LEDs are physically arranged as a 3 x 3 grid."
+evidence = "PCB render and LED footprint positions."
+
+[[requirement]]
+id = "R10"
+category = "mechanical"
+must = true
+text = "The board outline fits within 50 mm x 55 mm."
+evidence = "PCB Edge.Cuts dimensions; outline Gerber."
+
+[[requirement]]
+id = "R11"
+category = "layout"
+must = true
+text = "The PCB uses at most 2 copper layers, is fully routed, and passes DRC with JLCPCB rules."
+evidence = "PCB stackup; DRC report with zero errors and zero unconnected items."
+
+[[requirement]]
+id = "R12"
+category = "layout"
+must = true
+text = "No trace is narrower than 0.2 mm and no copper clearance is below 0.2 mm, and the copper matches the schematic netlist."
+evidence = "PCB design rules and track widths; DRC report; schematic-to-PCB netlist comparison."
+
+[[requirement]]
+id = "R13"
+category = "bom"
+must = true
+text = "All parts are RoHS-compliant, and every assembled part has an LCSC part number that JLCPCB can source."
+evidence = "bom.csv LCSC column; BOM resolution report; cpl.csv."
