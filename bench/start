@@ -104,6 +104,14 @@ def main() -> int:
     (ws / ".run.json").write_text(json.dumps(run, indent=2) + "\n")
 
     if not args.no_branch:
+        # Record the run's condition on its branch (neutral message: blinding).
+        rec = REPO / "submissions" / run_id
+        rec.mkdir(parents=True)
+        (rec / "run.json").write_text(json.dumps(run, indent=2) + "\n")
+        subprocess.run(["git", "-C", str(REPO), "add", "--", str(rec.relative_to(REPO))], check=True)
+        subprocess.run(["git", "-C", str(REPO), "commit", "-q", "-m", f"Start {run_id}"], check=True)
+
+    if not args.no_branch:
         print(f"branch:    run/{run_id}")
     print(f"workspace: {ws}")
     print(f"prompt:    {ws / 'PROMPT.md'}")

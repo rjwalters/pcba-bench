@@ -83,8 +83,8 @@ def main() -> int:
     run["leak_scan"] = {"hits": hits, "clean": not hits}
 
     out = REPO / "submissions" / args.run_id
-    if out.exists():
-        sys.exit(f"{out} already exists")
+    if out.exists() and (out / "deliverables").exists():
+        sys.exit(f"{out} already holds a submission")
     shutil.copytree(ws / "deliverables", out / "deliverables")
     # A board counts as attempted once its folder holds a KiCad schematic or PCB.
     run["attempted"] = sorted(b for b in run["boards"]
