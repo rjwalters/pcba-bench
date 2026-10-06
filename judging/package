@@ -479,8 +479,9 @@ def renders(cli: str, sch: Path | None, pcb: Path | None, copper: list[str], out
                 log.append(run(["pdftoppm", "-png", "-r", "600", "-singlefile", str(pdf), str(out / stem)]))
                 pdf.unlink()
                 png = out / f"{stem}.png"
-                if png.is_file() and shutil.which("magick"):
-                    log.append(run(["magick", str(png), "-trim", "+repage", "-bordercolor", "white",
+                im = shutil.which("magick") or shutil.which("convert")  # ImageMagick 7 or 6
+                if png.is_file() and im:
+                    log.append(run([im, str(png), "-trim", "+repage", "-bordercolor", "white",
                                     "-border", "40", "-resize", "2400x2400>", str(png)]))
     return log
 

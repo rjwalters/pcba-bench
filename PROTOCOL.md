@@ -18,10 +18,10 @@ The agent's workspace contains these files, copied from `boards/<id>/`, **and no
 
 The environment also provides:
 
-- KiCad 10 (`kicad-cli` plus the standard symbol, footprint and 3D libraries), the same version for every track;
-- whatever the submitter's **tools supplement** declares.
+- KiCad 10 (`kicad-cli` plus the standard symbol, footprint and 3D libraries), the same version for every track. The reference environment is the pinned container in `container/` (KiCad 10.0.6).
+- Whatever the submitter's **tools supplement** declares, **installed before the clock starts**: a track's toolkit is part of its image (see `container/README.md`). Installing tools during a run counts against the run's time.
 
-The workspace must be created **outside** your fork's checkout (`bench/start` does this), so the agent can't see other boards, other submissions, or this repo's history.
+The workspace must be created **outside** your fork's checkout (`bench/start` does this), so the agent can't see other boards, other submissions, or this repo's history. In the reference containers the agent sees only `/work`, which holds the three input files (read-only) and `deliverable/`.
 
 ## 3. Prompts
 
@@ -57,7 +57,8 @@ bench/start --board 03-usb-joystick --track kicad-tools --minutes 120 \
             --agent "claude-code 2.x / claude-opus-5-5" --tools prompts/tools/kicad-tools.md
 #    → creates ~/pcba-bench-runs/<run-id>/ with the input set
 #    → writes <run-id>/PROMPT.md (initial prompt + supplement, ready to paste)
-# 3. Launch the agent with cwd = ~/pcba-bench-runs/<run-id>/, then in the same
+# 3. Either let a driver do steps 3-4 (bench/drive-claude-code <run-id> --image ...),
+#    or launch the agent yourself with cwd = ~/pcba-bench-runs/<run-id>/, then in the same
 #    moment send PROMPT.md and start the clock:
 bench/finish <run-id> --mark-start
 #    Use the continue prompt only as allowed in §3.
@@ -72,7 +73,7 @@ bench/finish <run-id> --transcript path/to/session.jsonl --continues N
 `submissions/<run-id>/`:
 
 - `deliverable/`: exactly as it was at the deadline.
-- `run.json`: board, track, agent and model (name and version), tools supplement hash, prompt version, start and finish times, the number of continue prompts sent, and token or cost figures if available.
+- `run.json`: board, track, agent and model (name and version), the track image digest, tools supplement hash, prompt version, start and finish times, the number of continue prompts sent, token or cost figures if available, and the transcript leak scan (`bench/finish` flags any reference to the kicad-tools reference designs).
 - `transcript.*`: the full session log, with timestamps if the agent produces them. Required for audit; never shown to judges.
 - `tools.md`: the exact supplement used.
 

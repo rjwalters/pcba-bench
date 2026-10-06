@@ -31,7 +31,7 @@ effort = "high"
 [[judge]]
 vendor = "zhipu"
 model = "glm-5.3"
-harness = "TBD"   # which native harness runs GLM-5.3 is an open decision
+harness = "opencode"
 api = "openai-compatible"
 base_url = "https://api.z.ai/api/paas/v4/"   # Z.ai OpenAI-compatible endpoint; confirm before the first live run
 key_env = "ZAI_API_KEY"

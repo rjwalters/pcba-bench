@@ -5,12 +5,20 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
+# PROTOCOL.md §7: reference designs for these boards live in the kicad-tools repo.
+LEAK_PATTERNS = (
+    re.compile(r"github\.com/rjwalters/kicad-tools/(?:tree|blob|raw)/[^\s\"']*boards/", re.I),
+    re.compile(r"raw\.githubusercontent\.com/rjwalters/kicad-tools/[^\s\"']*boards/", re.I),
+    re.compile(r"codeload\.github\.com/rjwalters/kicad-tools", re.I),
+    re.compile(r"git clone[^\n\"']*rjwalters/kicad-tools", re.I),
+)
 
 
 def now() -> str:
@@ -26,6 +34,7 @@ def main() -> int:
     ap.add_argument("--continues", type=int, help="number of continue prompts sent")
     ap.add_argument("--tokens", type=int, help="total tokens, if known")
     ap.add_argument("--cost-usd", type=float, help="total cost, if known")
+    ap.add_argument("--image-digest", help="track container image ID/digest")
     args = ap.parse_args()
 
     ws = args.runs_dir.expanduser().resolve() / args.run_id
@@ -56,6 +65,11 @@ def main() -> int:
     run["continue_prompts_sent"] = args.continues
     run["tokens"] = args.tokens
     run["cost_usd"] = args.cost_usd
+    run["image_digest"] = args.image_digest
+
+    text = args.transcript.read_text(errors="replace")
+    hits = sorted({m.group(0)[:160] for pat in LEAK_PATTERNS for m in pat.finditer(text)})
+    run["leak_scan"] = {"hits": hits, "clean": not hits}
 
     out = REPO / "submissions" / args.run_id
     if out.exists():
@@ -66,6 +80,10 @@ def main() -> int:
     (out / "run.json").write_text(json.dumps(run, indent=2) + "\n")
 
     print(f"submission: {out}")
+    if hits:
+        print("WARNING: transcript references the kicad-tools reference designs (PROTOCOL.md §7):")
+        for h in hits:
+            print(f"  {h}")
     if run["over_deadline"]:
         print(f"WARNING: snapshot taken {elapsed:.0f} min after start (allotment {run['minutes']})")
     return 0

@@ -49,13 +49,12 @@ The fork workflow is in [PROTOCOL.md](PROTOCOL.md):
 - the evidence-pack generator `judging/package`;
 - the grader mutation self-test `judging/selftest`, which currently catches all 8 planted defect classes;
 - native-harness judging (`judging/start-judging` and `judging/finish-judging`, with the judge prompts in `prompts/`);
-- the score aggregator `judging/score`, which also has an optional API mode.
+- the score aggregator `judging/score`, which also has an optional API mode;
+- the reference containers (`container/`, KiCad 10.0.6 pinned) and a Claude Code run driver, `bench/drive-claude-code`.
 
 Not built yet:
 
-- a harness for the GLM-5.3 judge;
-- a reference container image (pinned KiCad 10);
-- a non-benchmark clean fixture for the self-test.
+- drivers for other agents (Codex CLI, opencode).
 
 Submissions can be collected, evidence-packed and judged end to end today.
 

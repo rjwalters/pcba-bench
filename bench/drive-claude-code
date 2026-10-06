@@ -1,0 +1,133 @@
+#!/usr/bin/env python3
+"""Drive one benchmark run with Claude Code headless inside a track container (PROTOCOL.md §3–§5).
+
+    bench/drive-claude-code <run-id> --image pcba-bench/claude-code-kicad-tools [--model claude-opus-5-5]
+
+Prerequisites:
+  - `bench/start` has created ~/pcba-bench-runs/<run-id>/ (the workspace and PROMPT.md);
+  - CLAUDE_CODE_OAUTH_TOKEN (from `claude setup-token`) or ANTHROPIC_API_KEY is set on the host,
+    or the token is stored in ~/.config/pcba-bench/claude-oauth-token (mode 600).
+
+The driver mounts the workspace at /work and starts the clock (`bench/finish --mark-start`).
+It sends PROMPT.md once, then sends prompts/continue.md verbatim whenever the agent stops
+before the deadline, and kills the session at the deadline. The transcript (stream-json) is
+written on the host, outside the workspace, so the agent can neither read nor edit it.
+Afterwards it runs `bench/finish` to snapshot the deliverable.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+import uuid
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+GRACE_S = 60  # don't start a continue turn with less than this left
+
+
+def strip_comment(text: str) -> str:
+    return re.sub(r"<!--.*?-->\s*", "", text, count=1, flags=re.S)
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("run_id")
+    ap.add_argument("--image", required=True)
+    ap.add_argument("--model", default="claude-opus-5-5")
+    ap.add_argument("--runs-dir", type=Path, default=Path.home() / "pcba-bench-runs")
+    ap.add_argument("--platform", default="linux/amd64")
+    args = ap.parse_args()
+
+    runs_dir = args.runs_dir.expanduser().resolve()
+    ws = runs_dir / args.run_id
+    run = json.loads((ws / ".run.json").read_text())
+    minutes = run["minutes"]
+    token_file = Path.home() / ".config" / "pcba-bench" / "claude-oauth-token"
+    if not os.environ.get("CLAUDE_CODE_OAUTH_TOKEN") and token_file.is_file():
+        os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = token_file.read_text().strip()
+    env_names = [n for n in ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY") if os.environ.get(n)]
+    if not env_names:
+        sys.exit(f"set CLAUDE_CODE_OAUTH_TOKEN (from `claude setup-token`), write it to {token_file}, "
+                 "or set ANTHROPIC_API_KEY")
+    transcript = runs_dir / f"{args.run_id}.transcript.jsonl"
+
+    # Hidden files (.run.json, .tools.md) stay on the host: mount a view without them.
+    container = f"pcba-{uuid.uuid4().hex[:8]}"
+    subprocess.run(["docker", "run", "-d", "--rm", "--name", container, "--platform", args.platform,
+                    *[x for n in env_names for x in ("-e", n)],
+                    "-v", f"{ws / 'deliverable'}:/work/deliverable",
+                    *[x for f in ("BRIEF.md", "requirements.toml", "board.toml")
+                      for x in ("-v", f"{ws / f}:/work/{f}:ro")],
+                    args.image, "sleep", "infinity"], check=True, capture_output=True)
+    initial = (ws / "PROMPT.md").read_text()
+    cont_template = strip_comment((REPO / "prompts" / "continue.md").read_text()).strip()
+
+    subprocess.run([str(REPO / "bench" / "finish"), args.run_id, "--runs-dir", str(runs_dir), "--mark-start"],
+                   check=True)
+    start = time.monotonic()
+    deadline = start + minutes * 60
+    continues = 0
+    cost = 0.0
+    tokens = 0
+
+    def turn(prompt: str, resume: bool) -> None:
+        nonlocal cost, tokens
+        cmd = ["docker", "exec", "-i", container, "claude", "-p", "--model", args.model,
+               "--dangerously-skip-permissions", "--output-format", "stream-json", "--verbose"]
+        if resume:
+            cmd.append("--continue")
+        with transcript.open("a") as log:
+            log.write(json.dumps({"driver": "prompt", "continue": resume, "t": time.time(), "text": prompt}) + "\n")
+            log.flush()
+            proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+            proc.stdin.write(prompt)
+            proc.stdin.close()
+            try:
+                for line in proc.stdout:
+                    log.write(line)
+                    try:
+                        ev = json.loads(line)
+                    except ValueError:
+                        continue
+                    if ev.get("type") == "result":
+                        cost += float(ev.get("total_cost_usd") or 0)
+                        usage = ev.get("usage") or {}
+                        tokens += sum(int(usage.get(k) or 0) for k in
+                                      ("input_tokens", "output_tokens", "cache_read_input_tokens",
+                                       "cache_creation_input_tokens"))
+                    if time.monotonic() > deadline:
+                        break
+                proc.wait(timeout=max(1, deadline - time.monotonic()))
+            except subprocess.TimeoutExpired:
+                pass
+            finally:
+                if proc.poll() is None:
+                    proc.kill()
+                    log.write(json.dumps({"driver": "deadline_kill", "t": time.time()}) + "\n")
+
+    try:
+        turn(initial, resume=False)
+        while deadline - time.monotonic() > GRACE_S:
+            remaining_min = int((deadline - time.monotonic()) // 60)
+            turn(cont_template.replace("{REMAINING}", str(remaining_min)), resume=True)
+            continues += 1
+    finally:
+        subprocess.run(["docker", "kill", container], capture_output=True)
+
+    digest = subprocess.run(["docker", "image", "inspect", "--format", "{{.Id}}", args.image],
+                            capture_output=True, text=True).stdout.strip()
+    subprocess.run([str(REPO / "bench" / "finish"), args.run_id, "--runs-dir", str(runs_dir),
+                    "--transcript", str(transcript), "--continues", str(continues),
+                    "--image-digest", digest,
+                    "--tokens", str(tokens), "--cost-usd", f"{cost:.2f}"], check=True)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -8,7 +8,7 @@ Three judge models from **three different vendors**:
 |---|---|---|
 | Anthropic | `claude-opus-5-5` | Claude Code |
 | OpenAI | `gpt-6-astra` | Codex CLI |
-| Zhipu (Z.ai) | `glm-5.3` | TBD |
+| Zhipu (Z.ai) | `glm-5.3` | opencode |
 
 The panel is pinned by exact model ID in `judging/panel.toml`. Changing the panel bumps the judging version, and every existing submission is re-scored, so all leaderboard rows share one panel.
 
@@ -100,4 +100,4 @@ Each judge scores each submission once. Effort or reasoning level is fixed per p
 | delete the fab outputs | `fab_outputs_complete` |
 | delete the PCB | `pcb_present` |
 
-Run it after every grader change. The clean fixture must not be one of the ten benchmark boards, because the fixture would then publish a solution. Until a dedicated fixture lands, run it locally against any clean board.
+Run it after every grader change, against any clean submission you have locally. No fixture is committed, because committing a clean solution to one of the ten boards would publish it.
