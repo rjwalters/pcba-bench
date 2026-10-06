@@ -51,7 +51,7 @@ Eight runs: four agents × two toolkits, one 60-minute suite run each.
 |---|---|---|---|
 | Claude Opus 5.5 | Claude Code | planned | planned |
 | Claude Fable 5.1 | Claude Code | planned | planned |
-| Sol | Codex CLI | planned | planned |
+| GPT-6.1 Sol | Codex CLI | planned | planned |
 | GPT-6 Astra | Codex CLI | planned | planned |
 
 - **bare:** the agent with `kicad-cli`, Python and the web ([prompts/tools/bare.md](prompts/tools/bare.md)).
