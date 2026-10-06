@@ -1,39 +1,20 @@
-# Judge panel, judging version 1: three judges from three different vendors
-# (JUDGING.md). Changing any entry bumps `version` and re-scores every submission.
-#
-# harness   native harness a judge session runs in (the default judging mode)
-# api       used only by `judging/score --api`:
-#           "anthropic"         -> Anthropic Messages API (official SDK)
-#           "openai-compatible" -> Chat Completions (official OpenAI SDK, optional base_url)
-# key_env   environment variable holding that vendor's API key
-# images    send the PNG renders (set false for a text-only endpoint)
-# effort    reasoning effort, where the API exposes one; held fixed per panel version
+# Judge panel, judging version 1: three judges from three different vendors (JUDGING.md).
+# Each judge runs in its own native harness, opened on the submission branch, and is
+# given prompts/judge-session.md. Changing any entry bumps `version` and re-scores
+# every submission.
 version = 1
 
 [[judge]]
 vendor = "anthropic"
 model = "claude-opus-5-5"
 harness = "claude-code"
-api = "anthropic"
-key_env = "ANTHROPIC_API_KEY"
-images = true
-effort = "high"
 
 [[judge]]
 vendor = "openai"
 model = "gpt-6-astra"
 harness = "codex-cli"
-api = "openai-compatible"
-key_env = "OPENAI_API_KEY"
-images = true
-effort = "high"
 
 [[judge]]
 vendor = "zhipu"
 model = "glm-5.3"
 harness = "opencode"
-api = "openai-compatible"
-base_url = "https://api.z.ai/api/paas/v4/"   # Z.ai OpenAI-compatible endpoint; confirm before the first live run
-key_env = "ZAI_API_KEY"
-images = false   # confirm GLM-5.3 accepts image input before enabling
-effort = "high"

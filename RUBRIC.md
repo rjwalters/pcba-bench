@@ -26,6 +26,7 @@ Separately from the score, the evidence pack sets a binary **Manufacturable** fl
 
 ## Aggregates
 
-- **Board score:** the mean rubric total over k runs (k ≥ 1; k = 3 recommended), plus the min–max range.
-- **Suite score:** the mean board score over all ten boards. It is only reported for submissions that cover all ten.
-- **Manufacturable count:** the number of boards (of 10) flagged Manufacturable in at least one run, and in all k runs.
+- **Board score:** the rubric total for one attempted board (0–100). An unattempted board scores 0.
+- **Suite score:** the mean board score over all ten boards in a run. A run is one session with a fixed total time (PROTOCOL.md §1).
+- **Manufacturable count:** the number of the run's boards (of 10) whose Manufacturable flag is true.
+- **Leaderboard:** runs are grouped by agent, toolkit and time allotment, and repeated runs are averaged (`results/RESULTS.md`).

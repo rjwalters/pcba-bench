@@ -1,0 +1,97 @@
+#!/usr/bin/env python3
+"""Judge step 1: build this judge's blinded workspace from the checked-out run branch.
+
+    judging/prepare <run-id> --judge anthropic [--minutes 60] [--local]
+
+Regenerates an evidence pack for every attempted board in the pinned grader container
+(never trusting anything the submitter committed besides the deliverables), then builds
+a workspace OUTSIDE the repository holding only blinded material:
+
+    boards/<id>/inputs/ deliverable/ evidence/ renders/ judgement.schema.json
+    RUBRIC.md  check-judgement  JUDGE_PROMPT.md
+
+It starts the judge's clock and prints the workspace path.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import shutil
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import flow  # noqa: E402
+import judgement  # noqa: E402
+
+BUNDLE_DIRS = ("inputs", "deliverable", "evidence", "renders")
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("run_id")
+    ap.add_argument("--judge", required=True, help="vendor name from judging/panel.toml")
+    ap.add_argument("--minutes", type=int, default=60, help="the judge's total time for all boards")
+    ap.add_argument("--local", action="store_true", help="use the host kicad-cli instead of the grader image")
+    args = ap.parse_args()
+
+    judge = flow.judge_entry(args.judge)
+    sub = flow.submission_dir(args.run_id)
+    if (sub / "judgements" / args.judge).is_dir():
+        sys.exit(f"{args.judge} has already judged {args.run_id}")
+    boards = flow.attempted(args.run_id)
+    if not boards:
+        sys.exit(f"{args.run_id} attempted no boards; nothing to judge (judging/finalize scores it 0)")
+
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    ws_id = f"{args.run_id}--{args.judge}--{stamp}"
+    root = flow.JUDGE_RUNS / ws_id
+    bundles = flow.run_grader(args.run_id, root / "_grader", local=args.local)
+    ws = root / "workspace"
+    for b, bundle in bundles.items():
+        bd = ws / "boards" / b
+        for d in BUNDLE_DIRS:
+            if (bundle / d).is_dir():
+                shutil.copytree(bundle / d, bd / d)
+        ids = judgement.requirement_ids(bd / "inputs" / "requirements.toml")
+        (bd / "judgement.schema.json").write_text(json.dumps(judgement.output_schema(ids), indent=2) + "\n")
+    shutil.copy2(flow.REPO / "RUBRIC.md", ws / "RUBRIC.md")
+    shutil.copy2(flow.HERE / "judgement.py", ws / "check-judgement")
+    (ws / "check-judgement").chmod(0o755)
+    prompt = (flow.strip_comment((flow.REPO / "prompts" / "judge.md").read_text())
+              .replace("{MINUTES}", str(args.minutes))
+              .replace("{BOARD_LIST}", "\n".join(f"- `boards/{b}/`" for b in boards)))
+    (ws / "JUDGE_PROMPT.md").write_text(prompt)
+
+    meta = {
+        "schema": 2,
+        "workspace_id": ws_id,
+        "run_id": args.run_id,
+        "boards": boards,
+        "vendor": judge["vendor"],
+        "model": judge["model"],
+        "harness": judge["harness"],
+        "judging_version": flow.panel()["version"],
+        "minutes": args.minutes,
+        "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
+        "evidence_sha256": {b: hashlib.sha256((ws / "boards" / b / "evidence" / "summary.json").read_bytes())
+                            .hexdigest() for b in boards},
+        "grader": "local" if args.local else flow.BASE_IMAGE,
+        "started_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "finished_at": None,
+    }
+    # Kept beside the workspace, not in it, so the judge never reads it.
+    (root / "meta.json").write_text(json.dumps(meta, indent=2) + "\n")
+
+    print(f"WORKSPACE: {ws}")
+    print(f"BOARDS:    {', '.join(boards)}")
+    print(f"Next: cd into the workspace and follow JUDGE_PROMPT.md; afterwards run "
+          f"`judging/submit {ws_id}` from the repository root.")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

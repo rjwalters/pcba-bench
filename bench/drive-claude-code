@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Drive one benchmark run with Claude Code headless inside a track container (PROTOCOL.md §3–§5).
+"""Drive one suite run with Claude Code headless inside a track container (optional; PROTOCOL.md §3–§5).
 
     bench/drive-claude-code <run-id> --image pcba-bench/claude-code-kicad-tools [--model claude-opus-5-5]
 
@@ -61,9 +61,8 @@ def main() -> int:
     container = f"pcba-{uuid.uuid4().hex[:8]}"
     subprocess.run(["docker", "run", "-d", "--rm", "--name", container, "--platform", args.platform,
                     *[x for n in env_names for x in ("-e", n)],
-                    "-v", f"{ws / 'deliverable'}:/work/deliverable",
-                    *[x for f in ("BRIEF.md", "requirements.toml", "board.toml")
-                      for x in ("-v", f"{ws / f}:/work/{f}:ro")],
+                    "-v", f"{ws / 'deliverables'}:/work/deliverables",
+                    "-v", f"{ws / 'boards'}:/work/boards:ro",
                     args.image, "sleep", "infinity"], check=True, capture_output=True)
     initial = (ws / "PROMPT.md").read_text()
     cont_template = strip_comment((REPO / "prompts" / "continue.md").read_text()).strip()

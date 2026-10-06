@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
-"""Create an isolated run workspace for one board (PROTOCOL.md §2, §5).
+"""Create the submission branch and an isolated suite workspace for one run (PROTOCOL.md §2, §5).
 
-Copies only the board's input set into a directory outside the checkout,
-renders PROMPT.md (initial prompt + tools supplement) and records run.json.
+    bench/start --track kicad-tools --agent "claude-code 2.x / claude-opus-5-5" \\
+                --tools prompts/tools/kicad-tools.md [--minutes 60]
+
+The workspace (outside the checkout) holds every board's input set under boards/<id>/
+and an empty deliverables/<id>/ for each. PROMPT.md is the initial prompt plus the
+tools supplement. A run's id is opaque (run--<hex>); agent and toolkit live only in run.json.
 """
 
 from __future__ import annotations
@@ -11,15 +15,17 @@ import argparse
 import hashlib
 import json
 import re
+import secrets
 import shutil
+import subprocess
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 INPUT_FILES = ("BRIEF.md", "requirements.toml", "board.toml")
 MARKER = "---- TOOLS SUPPLEMENT"
-PROMPT_VERSION = 2
+PROMPT_VERSION = 3
+DEFAULT_MINUTES = 60
 
 
 def sha256(path: Path) -> str:
@@ -30,50 +36,59 @@ def strip_comment(text: str) -> str:
     return re.sub(r"<!--.*?-->\s*", "", text, count=1, flags=re.S)
 
 
+def all_boards() -> list[str]:
+    return sorted(p.name for p in (REPO / "boards").iterdir() if (p / "board.toml").is_file())
+
+
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--board", required=True, help="board id, e.g. 03-usb-joystick")
-    ap.add_argument("--track", required=True, help="track label, e.g. bare, kicad-tools")
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--track", required=True, help="toolkit label, e.g. bare, kicad-tools")
     ap.add_argument("--agent", required=True, help='agent + model, e.g. "claude-code 2.x / claude-opus-5-5"')
     ap.add_argument("--tools", required=True, type=Path, help="tools supplement markdown")
-    ap.add_argument("--minutes", type=int, default=120)
+    ap.add_argument("--minutes", type=int, default=DEFAULT_MINUTES, help="total time for the whole suite")
+    ap.add_argument("--boards", nargs="+", help="development only: a subset (missing boards still score 0)")
     ap.add_argument("--runs-dir", type=Path, default=Path.home() / "pcba-bench-runs")
+    ap.add_argument("--no-branch", action="store_true", help="don't create the submission branch")
     args = ap.parse_args()
 
-    board_dir = REPO / "boards" / args.board
-    if not board_dir.is_dir():
-        sys.exit(f"unknown board: {args.board}")
+    boards = args.boards or all_boards()
+    unknown = sorted(set(boards) - set(all_boards()))
+    if unknown:
+        sys.exit(f"unknown boards: {unknown}")
     tools = args.tools.resolve()
     if not tools.is_file():
         sys.exit(f"tools supplement not found: {tools}")
-
     runs_dir = args.runs_dir.expanduser().resolve()
     if runs_dir.is_relative_to(REPO):
         sys.exit("--runs-dir must be outside the pcba-bench checkout (PROTOCOL.md §2)")
 
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    run_id = f"{args.board}--{args.track}--{stamp}"
+    run_id = f"run--{secrets.token_hex(4)}"
+    if not args.no_branch:
+        dirty = subprocess.run(["git", "-C", str(REPO), "status", "--porcelain"], capture_output=True, text=True).stdout
+        if dirty.strip():
+            sys.exit("working tree is not clean; commit or stash first (or pass --no-branch)")
+        subprocess.run(["git", "-C", str(REPO), "switch", "-q", "-c", f"run/{run_id}"], check=True)
+
     ws = runs_dir / run_id
-    ws.mkdir(parents=True)
-    for name in INPUT_FILES:
-        shutil.copy2(board_dir / name, ws / name)
-    (ws / "deliverable").mkdir()
+    for b in boards:
+        (ws / "boards" / b).mkdir(parents=True)
+        for name in INPUT_FILES:
+            shutil.copy2(REPO / "boards" / b / name, ws / "boards" / b / name)
+        (ws / "deliverables" / b).mkdir(parents=True)
 
     initial = strip_comment((REPO / "prompts/initial.md").read_text())
-    initial = (
-        initial.replace("{BOARD_ID}", args.board)
-        .replace("{RUN_ID}", run_id)
-        .replace("{MINUTES}", str(args.minutes))
-    )
+    board_list = "\n".join(f"- `{b}`" for b in boards)
+    initial = (initial.replace("{RUN_ID}", run_id).replace("{MINUTES}", str(args.minutes))
+               .replace("{BOARD_COUNT}", str(len(boards))).replace("{BOARD_LIST}", board_list))
     head, _, _ = initial.partition(MARKER)
     prompt = head.rstrip() + "\n\n" + strip_comment(tools.read_text()).strip() + "\n"
     (ws / "PROMPT.md").write_text(prompt)
     shutil.copy2(tools, ws / ".tools.md")
 
     run = {
-        "schema": 1,
+        "schema": 2,
         "run_id": run_id,
-        "board": args.board,
+        "boards": boards,
         "track": args.track,
         "agent": args.agent,
         "minutes": args.minutes,
@@ -81,16 +96,18 @@ def main() -> int:
         "initial_prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
         "continue_prompt_sha256": sha256(REPO / "prompts/continue.md"),
         "tools_sha256": sha256(tools),
-        "inputs_sha256": {n: sha256(board_dir / n) for n in INPUT_FILES},
+        "inputs_sha256": {b: {n: sha256(REPO / "boards" / b / n) for n in INPUT_FILES} for b in boards},
         "started_at": None,
         "finished_at": None,
         "continue_prompts_sent": None,
     }
     (ws / ".run.json").write_text(json.dumps(run, indent=2) + "\n")
 
+    if not args.no_branch:
+        print(f"branch:    run/{run_id}")
     print(f"workspace: {ws}")
     print(f"prompt:    {ws / 'PROMPT.md'}")
-    print("Launch the agent with this workspace as cwd, then record the start:")
+    print("Launch the agent's harness with the workspace as cwd, send PROMPT.md, and start the clock:")
     print(f"  bench/finish {run_id} --mark-start")
     return 0
 

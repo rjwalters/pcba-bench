@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Mark a run's start, or snapshot it at the deadline into submissions/ (PROTOCOL.md §4–§6)."""
+"""Mark a run's start, or snapshot its deliverables at the deadline into submissions/ and commit (PROTOCOL.md §4–§6)."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import argparse
 import json
 import re
 import shutil
+import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -18,6 +19,8 @@ LEAK_PATTERNS = (
     re.compile(r"raw\.githubusercontent\.com/rjwalters/kicad-tools/[^\s\"']*boards/", re.I),
     re.compile(r"codeload\.github\.com/rjwalters/kicad-tools", re.I),
     re.compile(r"git clone[^\n\"']*rjwalters/kicad-tools", re.I),
+    # A local checkout on the same host (agents in native harnesses run on the host).
+    re.compile(r"kicad-tools/boards/\d\d-", re.I),
 )
 
 
@@ -35,6 +38,7 @@ def main() -> int:
     ap.add_argument("--tokens", type=int, help="total tokens, if known")
     ap.add_argument("--cost-usd", type=float, help="total cost, if known")
     ap.add_argument("--image-digest", help="track container image ID/digest")
+    ap.add_argument("--no-commit", action="store_true", help="don't commit the submission to the branch")
     args = ap.parse_args()
 
     ws = args.runs_dir.expanduser().resolve() / args.run_id
@@ -74,12 +78,26 @@ def main() -> int:
     out = REPO / "submissions" / args.run_id
     if out.exists():
         sys.exit(f"{out} already exists")
-    shutil.copytree(ws / "deliverable", out / "deliverable")
+    shutil.copytree(ws / "deliverables", out / "deliverables")
+    # A board counts as attempted once its folder holds a KiCad schematic or PCB.
+    run["attempted"] = sorted(b for b in run["boards"]
+                              if any((out / "deliverables" / b).glob("*.kicad_sch"))
+                              or any((out / "deliverables" / b).glob("*.kicad_pcb")))
     shutil.copy2(ws / ".tools.md", out / "tools.md")
     shutil.copy2(args.transcript, out / f"transcript{args.transcript.suffix}")
     (out / "run.json").write_text(json.dumps(run, indent=2) + "\n")
 
     print(f"submission: {out}")
+    if not args.no_commit:
+        branch = subprocess.run(["git", "-C", str(REPO), "rev-parse", "--abbrev-ref", "HEAD"],
+                                capture_output=True, text=True).stdout.strip()
+        if branch == "main":
+            print("WARNING: on main; not committing. Switch to the run/<run-id> branch and commit there.")
+        else:
+            # Neutral message, no trailers: the commit must not identify the agent (blinding).
+            subprocess.run(["git", "-C", str(REPO), "add", "--", str(out.relative_to(REPO))], check=True)
+            subprocess.run(["git", "-C", str(REPO), "commit", "-q", "-m", f"Submission {args.run_id}"], check=True)
+            print(f"committed on {branch}; now open this branch in each judge's harness (JUDGING.md)")
     if hits:
         print("WARNING: transcript references the kicad-tools reference designs (PROTOCOL.md §7):")
         for h in hits:

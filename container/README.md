@@ -4,7 +4,7 @@ Every track runs in a container built from one pinned base, so all tracks share 
 
 | Image | Dockerfile | Adds |
 |---|---|---|
-| `pcba-bench/base` | `container/Dockerfile` | KiCad **10.0.6** (official `kicad/kicad` image, pinned by digest), Python 3, poppler, ImageMagick, uv, and the grader (`package`, `selftest`, `score`, `start-judging`, `finish-judging` on `PATH`) |
+| `pcba-bench/base` | `container/Dockerfile` | KiCad **10.0.6** (official `kicad/kicad` image, pinned by digest), Python 3, poppler, ImageMagick and the grader (`package` and `selftest` on `PATH`). `judging/prepare` and `judging/finalize` call it automatically. |
 | `pcba-bench/claude-code-bare` | `container/tracks/claude-code-bare.Dockerfile` | Claude Code CLI |
 | `pcba-bench/claude-code-kicad-tools` | `container/tracks/claude-code-kicad-tools.Dockerfile` | kicad-tools (pip, with the C++ router built) and the `/kct:*` skills at user level |
 

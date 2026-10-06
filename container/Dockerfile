@@ -16,9 +16,6 @@ RUN apt-get update \
       poppler-utils imagemagick \
  && rm -rf /var/lib/apt/lists/*
 
-# uv runs judging/score's pinned dependencies.
-COPY --from=ghcr.io/astral-sh/uv:0.8 /uv /uvx /usr/local/bin/
-
 # Grader and run scripts. Board inputs ship too: the agent only ever sees the
 # per-run workspace copy that bench/start makes, never this tree.
 COPY bench/ /opt/pcba-bench/bench/
@@ -27,8 +24,7 @@ COPY prompts/ /opt/pcba-bench/prompts/
 COPY boards/ /opt/pcba-bench/boards/
 COPY RUBRIC.md PROTOCOL.md JUDGING.md /opt/pcba-bench/
 RUN rm -rf /opt/pcba-bench/judging/out /opt/pcba-bench/judging/responses \
- && chmod +x /opt/pcba-bench/bench/* /opt/pcba-bench/judging/package /opt/pcba-bench/judging/selftest \
-             /opt/pcba-bench/judging/score /opt/pcba-bench/judging/start-judging /opt/pcba-bench/judging/finish-judging
+ && chmod +x /opt/pcba-bench/bench/* /opt/pcba-bench/judging/package /opt/pcba-bench/judging/selftest
 ENV PATH="/opt/pcba-bench/bench:/opt/pcba-bench/judging:${PATH}" \
     KICAD_CLI=/usr/bin/kicad-cli
 

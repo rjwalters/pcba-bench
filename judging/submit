@@ -1,0 +1,84 @@
+#!/usr/bin/env python3
+"""Judge step 2: commit this judge's validated judgement to the submission branch.
+
+    judging/submit <workspace-id> [--transcript session.jsonl] [--no-finalize]
+
+Validates every boards/<id>/judgement.json in the workspace, copies them to
+submissions/<run-id>/judgements/<vendor>/<id>.json (+ meta.json), commits with a
+neutral message, and, if all three panel judges have now judged, runs
+judging/finalize (score, results row, push, PR).
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import shutil
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import flow  # noqa: E402
+import judgement  # noqa: E402
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("workspace_id")
+    ap.add_argument("--transcript", type=Path, help="the judge session's log, if the harness exposes one")
+    ap.add_argument("--no-finalize", action="store_true")
+    args = ap.parse_args()
+
+    root = flow.JUDGE_RUNS / args.workspace_id
+    meta_path = root / "meta.json"
+    if not meta_path.is_file():
+        sys.exit(f"no judge workspace {args.workspace_id} under {flow.JUDGE_RUNS}")
+    meta = json.loads(meta_path.read_text())
+    ws = root / "workspace"
+    judgements, problems = {}, []
+    for board in meta["boards"]:
+        bd = ws / "boards" / board
+        issues = judgement.check_board(bd)
+        if issues:
+            problems += [f"{board}: {i}" for i in issues]
+        else:
+            judgements[board] = json.loads((bd / "judgement.json").read_text())
+    if problems:
+        sys.exit("judgements are incomplete or invalid (run ./check-judgement in the workspace):\n"
+                 + "\n".join(f"- {p}" for p in problems))
+
+    meta["finished_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    elapsed = datetime.fromisoformat(meta["finished_at"]) - datetime.fromisoformat(meta["started_at"])
+    meta["elapsed_minutes"] = round(elapsed.total_seconds() / 60, 1)
+    meta["over_deadline"] = meta["elapsed_minutes"] > meta["minutes"] + 1
+
+    sub = flow.submission_dir(meta["run_id"])
+    vendor = meta["vendor"]
+    dest = sub / "judgements" / vendor
+    if dest.exists():
+        sys.exit(f"{vendor} has already judged {meta['run_id']}")
+    dest.mkdir(parents=True)
+    for board, out in judgements.items():
+        (dest / f"{board}.json").write_text(json.dumps(out, indent=2) + "\n")
+    (dest / "meta.json").write_text(json.dumps(meta, indent=2) + "\n")
+    if args.transcript and args.transcript.is_file():
+        shutil.copy2(args.transcript, dest / f"transcript{args.transcript.suffix}")
+    flow.commit([dest], f"Judgement {vendor} for {meta['run_id']}")
+    print(f"committed {len(judgements)} board judgement(s): {dest}")
+
+    vendors = [j["vendor"] for j in flow.panel()["judge"]]
+    missing = [v for v in vendors if not (sub / "judgements" / v / "meta.json").exists()]
+    if missing:
+        print(f"waiting for: {', '.join(missing)}")
+        return 0
+    if args.no_finalize:
+        print("all three judgements present; run judging/finalize to score and open the PR")
+        return 0
+    print("all three judgements present; finalizing")
+    return subprocess.run([sys.executable, str(flow.HERE / "finalize"), meta["run_id"]]).returncode
+
+
+if __name__ == "__main__":
+    sys.exit(main())

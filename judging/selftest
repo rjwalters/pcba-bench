@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """Grader mutation self-test (JUDGING.md): planted defects must fail the gates.
 
-    judging/selftest <clean-submission-dir> [--no-network]
+    judging/selftest <clean-dir> [--no-network]
+
+<clean-dir> holds deliverable/ (one board's clean deliverable) and run.json
+({"board": "<board-id>"}).
 
 Packages the clean submission (which must come out Manufacturable), then
 applies each mutation to a copy and asserts that the expected gate flips and
@@ -233,7 +236,9 @@ MUTATIONS = {
 
 
 def package(sub: Path, out: Path, network: bool) -> dict:
-    cmd = [sys.executable, str(HERE / "package"), str(sub), "-o", str(out), "--no-renders"]
+    board = json.loads((sub / "run.json").read_text())["board"]
+    cmd = [sys.executable, str(HERE / "package"), str(sub / "deliverable"), "--board", board,
+           "--name", sub.name, "-o", str(out), "--no-renders"]
     if not network:
         cmd.append("--no-network")
     subprocess.run(cmd, check=True, capture_output=True, text=True)

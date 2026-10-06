@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Build the blinded evidence pack judges receive for one submission (JUDGING.md).
+"""Build the blinded evidence pack judges receive for one board's deliverable (JUDGING.md).
 
-    judging/package submissions/<run-id> [-o judging/out] [--no-network]
+    judging/package <deliverable-dir> --board <board-id> [-o judging/out] [--name NAME] [--no-network]
 
-Produces <out>/<run-id>/ with:
+Produces <out>/<NAME>/ (NAME defaults to the board id) with:
     inputs/     BRIEF.md, requirements.toml, board.toml for the board
     evidence/   erc.json drc.json (submitter rules) drc_fab.json (grader fab rules; gates)
                 fab_rules_applied.json lvs.json bom_resolution.json cpl.json fab.json
@@ -496,19 +496,22 @@ def count_violations(report: dict | None, key: str, severity: str = "error") -> 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("submission", type=Path)
+    ap.add_argument("deliverable", type=Path, help="one board's deliverable directory")
+    ap.add_argument("--board", required=True, help="board id, e.g. 03-usb-joystick")
+    ap.add_argument("--name", help="bundle directory name (default: the board id)")
     ap.add_argument("-o", "--out", type=Path, default=REPO / "judging" / "out")
     ap.add_argument("--no-network", action="store_true", help="skip LCSC lookups")
     ap.add_argument("--no-renders", action="store_true")
     args = ap.parse_args()
 
-    sub = args.submission.resolve()
-    run_meta = load_json(sub / "run.json") or {}
-    board_id = run_meta.get("board")
-    deliv = sub / "deliverable"
-    if not board_id or not deliv.is_dir():
-        sys.exit(f"{sub}: needs run.json with 'board' and a deliverable/ directory")
-    out = args.out.resolve() / sub.name
+    deliv = args.deliverable.resolve()
+    board_id = args.board
+    if not deliv.is_dir():
+        sys.exit(f"{deliv}: not a directory")
+    if not (REPO / "boards" / board_id / "board.toml").is_file():
+        sys.exit(f"unknown board: {board_id}")
+    name = args.name or board_id
+    out = args.out.resolve() / name
     if out.exists():
         shutil.rmtree(out)
     ev = out / "evidence"
@@ -670,7 +673,7 @@ def main() -> int:
         "notes": notes,
     })
     # Command log is for maintainers; it can reveal file names, so keep it out of the judge bundle.
-    write_json(out.parent / f"{sub.name}.commands.json", commands)
+    write_json(out.parent / f"{name}.commands.json", commands)
 
     print(f"evidence pack: {out}")
     print(json.dumps({"manufacturable": manufacturable, **gates}, indent=2))

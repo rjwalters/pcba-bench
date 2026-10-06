@@ -1,0 +1,157 @@
+#!/usr/bin/env python3
+"""Final step: score a fully judged run, add its results row, push, open the PR.
+
+    judging/finalize <run-id> [--local] [--no-pr]
+
+Re-runs the grader for the evidence gates, aggregates the three committed judgements
+per attempted board (judging/scoring.py), and scores unattempted boards 0. Then it:
+  - writes submissions/<run-id>/score.json and results/rows/<run-id>.json;
+  - re-renders results/RESULTS.md and commits;
+  - pushes the branch and opens a PR to main (on rjwalters/pcba-bench when run from a fork).
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import statistics
+import subprocess
+import sys
+import tempfile
+import tomllib
+from datetime import datetime, timezone
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import flow  # noqa: E402
+import judgement  # noqa: E402
+import scoring  # noqa: E402
+
+UPSTREAM = "rjwalters/pcba-bench"
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("run_id")
+    ap.add_argument("--local", action="store_true", help="use the host kicad-cli instead of the grader image")
+    ap.add_argument("--no-pr", action="store_true", help="commit only; don't push or open a PR")
+    args = ap.parse_args()
+
+    sub = flow.submission_dir(args.run_id)
+    run = flow.load_json(sub / "run.json")
+    panel = flow.panel()
+    suite = sorted(p.name for p in (flow.REPO / "boards").iterdir() if (p / "board.toml").is_file())
+    attempted = run.get("attempted", [])
+
+    # Every panel judge must have judged every attempted board with the pinned model.
+    judges = {}
+    for j in panel["judge"]:
+        meta = flow.load_json(sub / "judgements" / j["vendor"] / "meta.json")
+        if not meta:
+            sys.exit(f"missing judgements from {j['vendor']}")
+        if meta.get("model") != j["model"] or meta.get("judging_version") != panel["version"]:
+            sys.exit(f"{j['vendor']} judged with {meta.get('model')} / panel v{meta.get('judging_version')}; "
+                     f"panel pins {j['model']} / v{panel['version']}")
+        judges[j["vendor"]] = {k: meta.get(k) for k in ("model", "harness", "elapsed_minutes", "over_deadline")}
+
+    with tempfile.TemporaryDirectory(prefix="pcba-finalize-") as tmp:
+        bundles = flow.run_grader(args.run_id, Path(tmp), local=args.local)
+        summaries = {b: flow.load_json(d / "evidence" / "summary.json") for b, d in bundles.items()}
+
+    boards = {}
+    for b in suite:
+        if b not in attempted:
+            boards[b] = {"attempted": False, "total": 0.0, "manufacturable": False}
+            continue
+        reqs = tomllib.loads((flow.REPO / "boards" / b / "requirements.toml").read_text())["requirement"]
+        ids = [r["id"] for r in reqs]
+        musts = {r["id"]: bool(r.get("must", True)) for r in reqs}
+        outs = {}
+        for vendor in judges:
+            path = sub / "judgements" / vendor / f"{b}.json"
+            if not path.is_file():
+                sys.exit(f"{vendor} has no judgement for {b}")
+            out = json.loads(path.read_text())
+            problems = judgement.validate(out, ids)
+            if problems:
+                sys.exit(f"{vendor} judgement for {b} invalid: {problems}")
+            outs[vendor] = out
+        gates = summaries[b]["gates"]
+        boards[b] = {"attempted": True, "manufacturable": summaries[b]["manufacturable"], "gates": gates,
+                     "kicad_cli_version": summaries[b].get("kicad_cli_version"),
+                     **scoring.aggregate(outs, gates, musts)}
+
+    suite_score = round(statistics.mean(boards[b]["total"] for b in suite), 1)
+    mfr = sum(1 for b in suite if boards[b]["manufacturable"])
+    review = sorted(b for b in suite if boards[b].get("needs_human_review"))
+    result = {
+        "judging_version": panel["version"],
+        "run_id": args.run_id,
+        "suite_score": suite_score,
+        "manufacturable_count": mfr,
+        "boards_attempted": len(attempted),
+        "boards_in_suite": len(suite),
+        "needs_human_review": review,
+        "judges": judges,
+        "boards": boards,
+    }
+    (sub / "score.json").write_text(json.dumps(result, indent=2) + "\n")
+
+    row = {
+        "run_id": args.run_id,
+        "agent": run.get("agent"),
+        "track": run.get("track"),
+        "minutes": run.get("minutes"),
+        "suite_score": suite_score,
+        "manufacturable_count": mfr,
+        "boards_attempted": len(attempted),
+        "boards": {b: {"score": boards[b]["total"], "manufacturable": boards[b]["manufacturable"],
+                       "attempted": boards[b]["attempted"]} for b in suite},
+        "needs_human_review": review,
+        "cost_usd": run.get("cost_usd"),
+        "judging_version": panel["version"],
+        "judged_at": datetime.now(timezone.utc).date().isoformat(),
+    }
+    rows = flow.REPO / "results" / "rows"
+    rows.mkdir(parents=True, exist_ok=True)
+    (rows / f"{args.run_id}.json").write_text(json.dumps(row, indent=2) + "\n")
+    subprocess.run([sys.executable, str(flow.REPO / "results" / "render")], check=True)
+    flow.commit([sub / "score.json", rows / f"{args.run_id}.json", flow.REPO / "results" / "RESULTS.md"],
+                f"Score {args.run_id}: {suite_score}")
+    print(json.dumps({k: result[k] for k in ("suite_score", "manufacturable_count", "boards_attempted",
+                                             "needs_human_review")}, indent=2))
+
+    if args.no_pr:
+        return 0
+    branch = flow.git("rev-parse", "--abbrev-ref", "HEAD")
+    if branch in ("main", "HEAD"):
+        sys.exit("refusing to push: check out the run branch, not main")
+    flow.git("push", "-u", "origin", branch)
+    title = f"Result: {run.get('agent')} · {run.get('track')} · {run.get('minutes')} min · {suite_score}"
+    table = ["| Board | Score | Mfr |", "|---|---|---|"] + [
+        f"| {b} | {boards[b]['total'] if boards[b]['attempted'] else '–'} | "
+        f"{'✓' if boards[b]['manufacturable'] else ''} |" for b in suite]
+    body = "\n".join([
+        f"Run `{args.run_id}`: suite score **{suite_score} / 100** "
+        f"({len(attempted)}/{len(suite)} boards attempted, {mfr} Manufacturable).",
+        "", *table, "",
+        f"Judges: {', '.join(f'{v} ({m['model']}, {m['harness']})' for v, m in judges.items())}.",
+        f"Needs human review: {', '.join(review) or 'none'}.",
+        "",
+        f"Adds `results/rows/{args.run_id}.json` and re-renders `results/RESULTS.md`.",
+    ])
+    origin = flow.git("remote", "get-url", "origin")
+    if UPSTREAM in origin:
+        repo_args, head = [], branch
+    else:  # fork: open the PR on upstream from <fork-owner>:<branch>
+        owner = re.search(r"[:/]([^/:]+)/[^/]+?(?:\.git)?$", origin).group(1)
+        repo_args, head = ["--repo", UPSTREAM], f"{owner}:{branch}"
+    pr = subprocess.run(["gh", "pr", "create", *repo_args, "--base", "main", "--head", head,
+                         "--title", title, "--body", body], capture_output=True, text=True)
+    print(pr.stdout.strip() or pr.stderr.strip())
+    return pr.returncode
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Judgement schema and validator, shared by judging/score and the judge workspace.
 
-In a judge workspace (copied there by judging/start-judging as ./check-judgement):
-    ./check-judgement            # validates ./judgement.json against ./inputs/requirements.toml
+In a judge workspace (copied there by judging/prepare as ./check-judgement):
+    ./check-judgement            # validates boards/<id>/judgement.json for every board in the workspace
 """
 
 from __future__ import annotations
@@ -76,22 +76,34 @@ def requirement_ids(requirements_toml: Path) -> list[str]:
     return [r["id"] for r in tomllib.loads(requirements_toml.read_text())["requirement"]]
 
 
-def main() -> int:
-    here = Path.cwd()
-    path = here / "judgement.json"
+def check_board(board_dir: Path) -> list[str]:
+    path = board_dir / "judgement.json"
     if not path.is_file():
-        print("judgement.json not found in the current directory")
-        return 1
+        return ["judgement.json not written yet"]
     try:
         out = json.loads(path.read_text())
     except ValueError as exc:
-        print(f"judgement.json is not valid JSON: {exc}")
+        return [f"not valid JSON: {exc}"]
+    return validate(out, requirement_ids(board_dir / "inputs" / "requirements.toml"))
+
+
+def main() -> int:
+    boards = sorted(p for p in (Path.cwd() / "boards").glob("*") if (p / "inputs").is_dir())
+    if not boards:
+        print("no boards/<id>/inputs found; run this from the judge workspace root")
         return 1
-    problems = validate(out, requirement_ids(here / "inputs" / "requirements.toml"))
-    if problems:
-        print("INVALID:\n" + "\n".join(f"- {p}" for p in problems))
+    bad = 0
+    for b in boards:
+        problems = check_board(b)
+        if problems:
+            bad += 1
+            print(f"INVALID boards/{b.name}/judgement.json:\n" + "\n".join(f"  - {p}" for p in problems))
+        else:
+            print(f"ok      boards/{b.name}/judgement.json")
+    if bad:
+        print(f"{bad} of {len(boards)} board judgements need fixing")
         return 1
-    print("OK: judgement.json is well-formed")
+    print(f"OK: all {len(boards)} board judgements are well-formed")
     return 0
 
 

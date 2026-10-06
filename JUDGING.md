@@ -16,15 +16,21 @@ Self-preference bias is handled in three ways:
 
 1. **Vendor diversity.** At most one judge can share a vendor with the agent under test.
 2. **Median aggregation.** A single biased judge can't move a per-criterion median.
-3. **Blinding.** Judges never see `run.json`, the transcript, the tools supplement, or the track. In native-harness mode, each judge works in a workspace built from the evidence bundle alone, never in the submission branch itself. The packager also strips agent-identifying text from the deliverable, such as "Generated with …" trailers and tool banners in file headers or `DECISIONS.md`.
+3. **Blinding.** Judges don't see `run.json`, the transcript, the tools supplement, the toolkit or other judges' results.
+   - Run ids are opaque (`run--<hex>`), and the scripts make every branch commit with a neutral message.
+   - A judge opens the run branch only to run `judging/prepare`, then does the review in a workspace outside the repository that holds only blinded material.
+   - The packager strips agent-identifying text from the deliverables, such as "Generated with …" trailers and tool banners in file headers or `DECISIONS.md`.
+   - The judge session prompt forbids reading identity files, `judgements/` and git history.
+
+   This is enforced by instruction, not by access control. A judge in its native harness can technically read the branch. The median over three vendors limits what any single leak can do. If that proves insufficient, the fallback is a separate blinded judging branch.
 
 Bias is also measured. For each judge we report its mean score on its own vendor's submissions minus the panel median on those submissions.
 
 ## What judges receive
 
-`judging/package` builds one blinded bundle per submission, `judging/out/<run-id>/`:
+For each attempted board, `judging/package` (in the pinned grader container) builds one blinded bundle:
 
-- `BRIEF.md`, `requirements.toml` and `board.toml` for the board;
+- `inputs/`: `BRIEF.md`, `requirements.toml` and `board.toml` for the board;
 - the **evidence pack**, produced deterministically and identically for every submission:
   - `erc.json` from `kicad-cli sch erc`.
   - `drc.json`: KiCad DRC under the **submitter's own** rules, with zones refilled and schematic parity on. This shows design intent.
@@ -38,42 +44,41 @@ Bias is also measured. For each judge we report its mean score on its own vendor
   - Renders: schematic pages, per-copper-layer PCB plots and top and bottom 3D views, as PNG.
 - `deliverable/`: a blinded copy of the whole deliverable. Text files and the contents of zips are scrubbed of agent and tool identity, so a judge can open it with `kicad-cli`.
 
-## Judge procedure (native harness; the default)
+## Judge procedure (native harness, on the run branch)
 
-Each judge runs the same way a benchmark run does: a fresh session of its own native harness, a fixed prompt, a fixed time, and a file as its output.
+Each judge runs much like a benchmark run: a fresh session of its own native harness, a fixed prompt, a fixed time, and committed files as its output.
 
-```bash
-judging/package submissions/<run-id>                         # evidence bundle -> judging/out/<run-id>/
-judging/start-judging judging/out/<run-id> --judge anthropic  # blinded workspace in ~/pcba-bench-judging/
-#   launch the judge's harness (panel.toml `harness`) with that workspace as cwd,
-#   send JUDGE_PROMPT.md verbatim, and start the clock:
-judging/finish-judging <workspace-id> --mark-start
-#   ...the judge writes ./judgement.json and validates it with ./check-judgement...
-judging/finish-judging <workspace-id> --transcript session.jsonl --continues N
-#   repeat for the other two judges, then:
-judging/score judging/out/<run-id>
+1. **Open the run branch** (`run/<run-id>`) in the judge's harness, as listed in `panel.toml`, with the repository root as the working directory.
+2. **Send `prompts/judge-session.md`** verbatim, with `{RUN_ID}` and `{VENDOR}` filled in. The only follow-up allowed is `prompts/judge-continue.md`, sent verbatim or set as the harness's goal or loop input. The session prompt has the judge:
+   1. run `judging/prepare <run-id> --judge <vendor>`, which regenerates the evidence for every attempted board in the grader container and builds the blinded workspace in `~/pcba-bench-judging/`;
+   2. follow that workspace's `JUDGE_PROMPT.md`, writing `boards/<id>/judgement.json` for each board and checking the results with `./check-judgement`. The judge has a 60-minute timer for all boards and writes a first judgement for every board before refining any.
+   3. run `judging/submit <workspace-id>`. It validates the judgements and **commits** them to `submissions/<run-id>/judgements/<vendor>/`, along with a `meta.json` recording model, harness, prompt hash and timing.
+3. **Finalize.** When `judging/submit` sees that all three panel judges have committed, it runs `judging/finalize`, which:
+   1. re-grades for the gates;
+   2. scores each board and the suite;
+   3. writes `score.json` and `results/rows/<run-id>.json`, and re-renders `results/RESULTS.md`;
+   4. commits, pushes and **opens the PR to main** (from a fork, to `rjwalters/pcba-bench`).
+
+   `finalize` refuses judgements from any model other than the one the panel pins.
+
+The workspace contains `boards/<id>/` for each attempted board, with `inputs/`, the blinded `deliverable/`, `evidence/`, `renders/` and `judgement.schema.json`, plus `RUBRIC.md`, `./check-judgement` and `JUDGE_PROMPT.md`, and nothing else. The judge may inspect a design itself, including running `kicad-cli` read-only on a copy, but the evidence pack is ground truth.
+
+Each board's `judgement.json` matches its `judgement.schema.json`:
+
+```json
+{
+  "requirements": [{"id": "R1", "verdict": "met|partial|unmet", "reason": "..."}],
+  "criteria": {"A": {"score": 0, "reason": "..."}, "B": {}, "C": {}, "D": {}, "E": {}, "F": {}},
+  "caps_applied": ["DRC errors > 0 -> B <= 2"],
+  "false_claims": ["..."]
+}
 ```
 
-- **The judge workspace** contains `inputs/`, the blinded `deliverable/`, `evidence/`, `renders/`, `RUBRIC.md`, `judgement.schema.json`, `./check-judgement` and `JUDGE_PROMPT.md`, and nothing else. The judge may inspect the design itself, including running `kicad-cli` read-only on a copy, but the evidence pack is ground truth.
-- **Prompts.** The first message is `prompts/judge.md`. The only follow-up allowed is `prompts/judge-continue.md`, sent verbatim or set as the harness's goal or loop input. As in the benchmark, the judge starts a timer and has a fixed allotment, 30 minutes by default.
-- **Output.** `judgement.json` matches `judgement.schema.json`:
-
-  ```json
-  {
-    "requirements": [{"id": "R1", "verdict": "met|partial|unmet", "reason": "..."}],
-    "criteria": {"A": {"score": 0, "reason": "..."}, "B": {}, "C": {}, "D": {}, "E": {}, "F": {}},
-    "caps_applied": ["DRC errors > 0 -> B <= 2"],
-    "false_claims": ["..."]
-  }
-  ```
-
-- **Collection.** `finish-judging` rejects an invalid judgement, records timing, the prompt hash and the harness, and stores everything in `judging/responses/<run-id>/`. `judging/score` refuses a judgement whose recorded model differs from the pinned panel.
-
-**API mode.** `judging/score --api` sends the same material in one structured-output request per judge, and `--dry-run` writes those requests without sending them. It exists for automation and testing; the native-harness judgements are the official ones.
+No API tokens are involved anywhere: agents and judges use their own logged-in harnesses, and the grader is a local container.
 
 ## Aggregation
 
-`judging/score` applies these steps:
+For each attempted board, `judging/finalize` (via `judging/scoring.py`) applies these steps:
 
 1. It recomputes **C** from each judge's requirement verdicts: 4 minus 1 per unmet `must`, a partial counting half.
 2. It sets **F = 0** for any judge that reported a false claim.
@@ -81,13 +86,15 @@ judging/score judging/out/<run-id>
 4. It takes the **per-criterion median** and the weighted 0–100 total.
 5. It records each requirement's median verdict.
 
-**Disagreement:** when any criterion has a judge spread ≥ 2 points, the submission is flagged for human review. A maintainer may then re-run that judge once, but may never edit a score.
+Unattempted boards score 0. The **suite score** is the mean over all ten boards.
 
-Each judge scores each submission once. Effort or reasoning level is fixed per panel version. Sampling temperature is not used, because current reasoning models reject it.
+**Disagreement:** when any criterion on a board has a judge spread ≥ 2 points, that board is flagged for human review in the PR. A maintainer may then re-run that judge once, but may never edit a score.
+
+Each judge scores each run once.
 
 ## Grader self-test
 
-`judging/selftest <clean-submission>` checks that the grader catches planted defects. It packages a known-clean submission, which must come out Manufacturable. It then applies each mutation to a copy and requires the matching gate to flip and Manufacturable to become false:
+`judging/selftest <clean-dir>` checks that the grader catches planted defects. It packages a known-clean submission, which must come out Manufacturable. It then applies each mutation to a copy and requires the matching gate to flip and Manufacturable to become false:
 
 | Mutation | Must flip |
 |---|---|

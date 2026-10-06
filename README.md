@@ -1,17 +1,21 @@
 # pcba-bench
 
-**Can an AI agent design a manufacturable printed-circuit-board assembly from a written brief, unattended, in a fixed time?**
+**How many manufacturable printed-circuit-board assemblies can an AI agent design from written briefs, unattended, in one hour?**
 
-pcba-bench has ten boards, ranging from a single LED to a BLDC motor controller, an SDRAM tester and a USB-C PD supply. Each one is a short customer brief plus numbered requirements. The agent gets the brief, a declared set of tools and a fixed time budget, and nothing else. It must deliver:
+pcba-bench has ten boards, ranging from a single LED to a BLDC motor controller, an SDRAM tester and a USB-C PD supply. Each is a short customer brief plus numbered requirements. A **run** is one agent session with all ten briefs, a declared set of tools and **60 minutes** in total. The agent decides which boards to attempt and in what order. For each board it attempts, it must deliver:
 
 - a KiCad 10 schematic and PCB;
 - Gerbers and drill files;
 - a BOM with orderable JLCPCB/LCSC parts, and a CPL;
 - a `DECISIONS.md`.
 
-Submissions are scored on a six-part rubric by **three judge models from three different vendors** (Claude Opus 5.5, GPT-6 Astra and GLM-5.3), each running in its own native harness and working blind from a deterministic evidence pack (KiCad ERC/DRC, copper-vs-schematic comparison, BOM resolution, renders). The per-criterion median is the official score. A separate **Manufacturable** flag records whether the board would pass fab with no further work.
+**Scoring.**
 
-Each submission is an **agent + toolkit** pair, and any pairs can be compared. For example, a bare agent with only `kicad-cli` (say, Claude Opus 5.5 as-is) can go up against a different agent with a declared toolkit (say, Codex Astra 6.1 + some electronics toolkit). The leaderboard keys every row by agent, model version and toolkit, so it can answer "which agent is best on its own" and "how much does toolkit X add", alongside cross-pair comparisons.
+- Each attempted board is scored 0–100 on a six-part rubric by **three judge models from three different vendors**: Claude Opus 5.5, GPT-6 Astra and GLM-5.3. Each runs in its own native harness and works blind from a deterministic evidence pack (KiCad ERC/DRC, copper-vs-schematic comparison, BOM resolution, renders). The per-criterion median is the official board score.
+- Unattempted boards score 0. The **suite score** is the mean over all ten boards.
+- A separate **Manufacturable** count records how many boards would pass fab with no further work.
+
+Each run is an **agent + toolkit** pair, and any pairs can be compared. For example, a bare agent with only `kicad-cli` (say, Claude Opus 5.5 as-is) can go up against a different agent with a declared toolkit (say, Codex Astra 6.1 + some electronics toolkit). The leaderboard keys every row by agent, model version, toolkit and time allotment.
 
 ## Boards
 
@@ -28,35 +32,30 @@ Each submission is an **agent + toolkit** pair, and any pairs can be compared. F
 | 08 | Four-channel precision acquisition | 4 | 12 | medium |
 | 09 | USB-C PD 5 V power supply | 4 | 14 | medium |
 
-The boards are independent tasks, **not a ladder**. The hints come from each board's `board.toml`; measured difficulty will replace them.
+The boards are not a ladder. The hints come from each board's `board.toml`; measured difficulty will replace them.
 
-## How to run
+## How a run works
 
-The fork workflow is in [PROTOCOL.md](PROTOCOL.md):
+Everything happens on one git branch, and no API tokens are needed. Agents and judges use their own logged-in native harnesses, and the grader is a local container. Details are in [PROTOCOL.md](PROTOCOL.md) and [JUDGING.md](JUDGING.md).
 
-1. Fork this repo, and pick an agent and a tools supplement.
-2. `bench/start` builds an isolated workspace with only that board's input files.
-3. Send the [initial prompt](prompts/initial.md) plus your tools supplement. If the agent stops early, send only the [continue prompt](prompts/continue.md), or set it as the agent's goal or loop input.
-4. Stop at **120 minutes**. `bench/finish` snapshots the deliverable and transcript into `submissions/`.
-5. Open a PR. Maintainers audit the transcript, then score it ([RUBRIC.md](RUBRIC.md), [JUDGING.md](JUDGING.md)).
+1. **Start.** `bench/start` creates branch `run/<run-id>` and an isolated workspace, outside the repo, with the ten briefs.
+2. **Run.** Open the agent's harness in that workspace and send `PROMPT.md`. That's the [initial prompt](prompts/initial.md) plus your tools supplement. If the agent stops early, send only the [continue prompt](prompts/continue.md), or set it as the agent's goal or loop input. Stop at 60 minutes.
+3. **Submit.** `bench/finish` snapshots the deliverables and transcript and **commits** them to the branch.
+4. **Judge.** Open the same branch in each judge's harness (Claude Code, Codex CLI, opencode) and send the [judge session prompt](prompts/judge-session.md). Each judge commits its judgements. The last one to finish scores the run, adds its row to [results/RESULTS.md](results/RESULTS.md), and **opens the PR** to main.
 
 ## Status
 
-**v0, protocol draft.** The following exist now:
+**v0, protocol draft.** All of the following exists and has been tested end to end on a scratch clone:
 
-- the input sets, the prompts, the rubric and the judging procedure;
-- the run scripts `bench/start` and `bench/finish`;
-- the evidence-pack generator `judging/package`;
-- the grader mutation self-test `judging/selftest`, which currently catches all 8 planted defect classes;
-- native-harness judging (`judging/start-judging` and `judging/finish-judging`, with the judge prompts in `prompts/`);
-- the score aggregator `judging/score`, which also has an optional API mode;
-- the reference containers (`container/`, KiCad 10.0.6 pinned) and a Claude Code run driver, `bench/drive-claude-code`.
+- the input sets and prompts;
+- the run scripts (`bench/start`, `bench/finish`);
+- the grader (`judging/package`) and its mutation self-test (`judging/selftest`, 8/8 planted defects caught);
+- the judge flow (`judging/prepare`, `judging/submit`, `judging/finalize`);
+- the results table (`results/render`);
+- the reference containers (`container/`, KiCad 10.0.6 pinned);
+- an optional container driver for Claude Code (`bench/drive-claude-code`).
 
-Not built yet:
-
-- drivers for other agents (Codex CLI, opencode).
-
-Submissions can be collected, evidence-packed and judged end to end today.
+No real runs have been scored yet.
 
 ## Provenance
 
